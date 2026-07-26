@@ -1,0 +1,9 @@
+gradio>=4.0.0
+pyzbar
+qrcode[pil]
+pillow
+opencv-python
+reportlab
+numpy
+google-genai
+pandas

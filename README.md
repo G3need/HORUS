@@ -108,11 +108,11 @@ graph TD
 
 ```bash
 # Clone repository
-git clone https://github.com/G3need/horus.git
-cd horus
+git clone https://github.com/G3need/HORUS.git
+cd HORUS
 
-# Install core dependencies
-pip install gradio qrcode reportlab google-genai opencv-python pyzbar
+# Install core dependencies via requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 2. Configure API Keys
