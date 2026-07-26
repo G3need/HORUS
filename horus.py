@@ -661,7 +661,13 @@ class HorusConfig:
     """Enterprise configuration for HORUS v10.4"""
     APP_NAME: str = "Horus Key Platinum v10.6 - Sovereign Edition"
     DB_NAME: str = "horus_sovereign.db"
-    AI_MODEL: str = "gemini-3-flash-preview"
+    AI_MODEL: str = "gemini-3.6-flash"
+    AI_FALLBACK_MODELS: list = field(default_factory=lambda: [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash"
+    ])
     AI_ENABLED: bool = False  # Set after import checking
     VERSION: str = "11.1.0-Sovereign"
 
@@ -690,10 +696,10 @@ class HorusConfig:
     # Hardcoded Gemini API Keys
     GEMINI_KEYS: list = field(default_factory=lambda: [
         k.strip() for k in (
-            os.getenv(GEMINI_KEYS) or 
-            os.getenv(GEMINI_API_KEY) or 
-            os.getenv(GOOGLE_API_KEY) or 
-        ).split(,) if k.strip()
+            os.getenv("GEMINI_KEYS") or 
+            os.getenv("GEMINI_API_KEY") or 
+            os.getenv("GOOGLE_API_KEY") or ""
+        ).split(",") if k.strip()
     ])
 
     def __post_init__(self):
@@ -783,7 +789,7 @@ class ReadmeGenerator:
 
 ### Enterprise Installation (Recommended)
 ```bash
-python HORUSv10.3.py
+python horus.py
 ```
 The application will automatically detect and install all system and Python dependencies.
 
@@ -901,7 +907,7 @@ Current system capabilities:
 ## 🚀 Quick Start
 
 ### Enterprise Demo
-1. Run the application: `python HORUSv10.3.py`
+1. Run the application: `python horus.py`
 2. Click "🔑 DEMO ACCESS" for instant enterprise testing
 3. Experience advanced QR scanning with camera integration
 4. Test enhanced AI chat capabilities
@@ -1865,9 +1871,9 @@ class HorusDB:
         self.cursor.execute("DROP TABLE IF EXISTS enterprise_packages")
         self.cursor.execute("DROP TABLE IF EXISTS ai_interactions")
         
-        # Updated travelers table with DEEP DATA fields (15 total)
+        # Updated travelers table with DEEP DATA fields (19 total)
         self.cursor.execute('''
-            CREATE TABLE travelers (\n                id INTEGER PRIMARY KEY, \n                name TEXT, \n                full_name TEXT,\n                passport_number TEXT UNIQUE, \n                nationality TEXT,\n                nationality_group TEXT,\n                passport_expiry TEXT,\n                biometric_hash TEXT, \n                wallet_balance REAL DEFAULT 0, \n                wallet_status TEXT DEFAULT 'LOCKED',\n                bank_linked BOOLEAN DEFAULT 0,\n                green_points INTEGER DEFAULT 0, \n                has_claimed_gift BOOLEAN DEFAULT 0,\n                created_at TEXT,\n                -- ALL 18 DEEP DATA FIELDS (2026 Procedure Compliance)\n                dob TEXT,\n                gender TEXT,\n                phone TEXT,\n                email TEXT,\n                arrival_date TEXT,\n                country_boarded TEXT,\n                flight_number TEXT,\n                mode_of_arrival TEXT,\n                departure_date TEXT,\n                country_residence TEXT,\n                visa_no TEXT,\n                issued_by TEXT,\n                accommodation_type TEXT,\n                accommodation_address TEXT,\n                occupation TEXT,\n                purpose_of_travel TEXT
+            CREATE TABLE travelers (\n                id INTEGER PRIMARY KEY, \n                name TEXT, \n                full_name TEXT,\n                passport_number TEXT UNIQUE, \n                nationality TEXT,\n                nationality_group TEXT,\n                passport_expiry TEXT,\n                biometric_hash TEXT, \n                wallet_balance REAL DEFAULT 0, \n                wallet_status TEXT DEFAULT 'LOCKED',\n                bank_linked BOOLEAN DEFAULT 0,\n                green_points INTEGER DEFAULT 0, \n                has_claimed_gift BOOLEAN DEFAULT 0,\n                created_at TEXT,\n                -- ALL 19 DEEP DATA FIELDS (2026 Procedure Compliance)\n                dob TEXT,\n                gender TEXT,\n                phone TEXT,\n                email TEXT,\n                arrival_date TEXT,\n                country_boarded TEXT,\n                flight_number TEXT,\n                mode_of_arrival TEXT,\n                departure_date TEXT,\n                country_residence TEXT,\n                visa_no TEXT,\n                issued_by TEXT,\n                accommodation_type TEXT,\n                accommodation_address TEXT,\n                occupation TEXT,\n                purpose_of_travel TEXT,\n                passport_issue_date TEXT,\n                transport_mode TEXT,\n                departure_mode TEXT,\n                departure_flight_number TEXT
             )
         ''')
         
@@ -1998,7 +2004,11 @@ class HorusDB:
         accommodation_type, 
         accommodation_address, 
         occupation, 
-        purpose_of_travel
+        purpose_of_travel,
+        passport_issue_date=None,
+        transport_mode=None,
+        departure_mode=None,
+        departure_flight_number=None
     ):
         """Register traveler with deep data fields and Procedure Doc 1030 compliance"""
         sql = '''INSERT INTO travelers (
@@ -2006,8 +2016,8 @@ class HorusDB:
             passport_expiry, biometric_hash, wallet_balance, wallet_status, bank_linked, green_points, has_claimed_gift, created_at,
             dob, gender, phone, email, arrival_date, country_boarded, flight_number, mode_of_arrival, 
             departure_date, country_residence, visa_no, issued_by, accommodation_type, accommodation_address, occupation, 
-            purpose_of_travel
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+            purpose_of_travel, passport_issue_date, transport_mode, departure_mode, departure_flight_number
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
         
         params = (
             name,
@@ -2038,7 +2048,11 @@ class HorusDB:
             accommodation_type,
             accommodation_address,
             occupation,
-            purpose_of_travel
+            purpose_of_travel,
+            passport_issue_date,
+            transport_mode,
+            departure_mode,
+            departure_flight_number
         )
         
         self.cursor.execute(sql, params)
@@ -2506,7 +2520,7 @@ def get_rotated_key():
         return valid_keys[0]
 
 def ask_ai(msg, history):
-    """Enterprise AI chat interface with comprehensive error handling and logging"""
+    """Enterprise AI chat interface with multi-model fallback chain (3.6 -> 3.5 -> 3.0 -> 2.5)"""
     if not config.AI_ENABLED:
         return "⚠️ Enterprise AI Chat is not available. Please install google-genai package."
     
@@ -2514,17 +2528,24 @@ def ask_ai(msg, history):
     if not key: 
         return "⚠️ Configuration Error: Please set GEMINI_KEYS environment variable with your API key."
     
-    try:
-        client = genai.Client(api_key=key)
-        res = client.models.generate_content(
-            model=config.AI_MODEL, 
-            contents=msg
-        )
-        logger.info(f"Enterprise AI response generated for message: {msg[:50]}...")
-        return res.text
-    except Exception as e: 
-        logger.error(f"Enterprise AI chat error: {str(e)}")
-        return f"AI Error: {str(e)}"
+    client = genai.Client(api_key=key)
+    models_to_try = [config.AI_MODEL] + [m for m in getattr(config, 'AI_FALLBACK_MODELS', ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"]) if m != config.AI_MODEL]
+    
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            res = client.models.generate_content(
+                model=model_name, 
+                contents=msg
+            )
+            logger.info(f"Enterprise AI response generated using {model_name} for message: {msg[:50]}...")
+            return res.text
+        except Exception as e:
+            logger.warning(f"⚠️ Model {model_name} failed: {e}. Trying next fallback model...")
+            last_error = e
+            
+    logger.error(f"Enterprise AI chat error across all models: {last_error}")
+    return f"AI Error (All models exhausted): {last_error}"
 
 # ==============================================================================
 # 📱 ENTERPRISE UI (PLATINUM DASHBOARD) - ENHANCED WITH SELF-HEALING
@@ -2532,7 +2553,7 @@ def ask_ai(msg, history):
 
 current_user = None
 
-def ui_login(image, passport, nationality, full_name, passport_expiry, occupation, purpose_of_travel, accommodation_address, dob, gender, phone, arrival_date, country_boarded, flight_number, mode_of_arrival, departure_date):
+def ui_login(image, passport, nationality, full_name, passport_expiry, occupation, purpose_of_travel, accommodation_address, dob, gender, phone, arrival_date, country_boarded, flight_number, mode_of_arrival, departure_date, passport_issue_date, transport_mode, accommodation_type, departure_mode, departure_flight, visa_no, issued_by):
     """Enterprise login with Procedure Doc 1030 compliance and 72-hour validation"""
     global current_user
     
@@ -2615,13 +2636,17 @@ def ui_login(image, passport, nationality, full_name, passport_expiry, occupatio
         flight_number.strip(),
         mode_of_arrival.strip(),
         departure_date.strip(),
-        nationality,  # country_residence
-        "TBD",  # visa_no
-        "TBD",  # issued_by
-        "Hotel",  # accommodation_type
+        country_boarded.strip(),  # country_residence
+        visa_no.strip() if visa_no else "TBD",  # visa_no
+        issued_by.strip() if issued_by else "TBD",  # issued_by
+        accommodation_type.strip() if accommodation_type else "Hotel",  # accommodation_type
         accommodation_address.strip(),  # accommodation_address
         occupation.strip(),  # occupation
-        purpose_of_travel.strip()  # purpose_of_travel
+        purpose_of_travel.strip(),  # purpose_of_travel
+        passport_issue_date.strip() if passport_issue_date else "TBD",  # passport_issue_date
+        transport_mode.strip() if transport_mode else "Commercial",  # transport_mode
+        departure_mode.strip() if departure_mode else "Air",  # departure_mode
+        departure_flight.strip() if departure_flight else "TBD"  # departure_flight_number
     )
     current_user = db.get_traveler(uid)
     
@@ -2638,7 +2663,8 @@ def ui_login(image, passport, nationality, full_name, passport_expiry, occupatio
             f"🌿 {green_points}",
             "🔒 ACCOUNT LOCKED - Deposit $200 USD to activate",
             "",  # QR input placeholder
-            gr.update(visible=False)  # Hide demo badge
+            gr.update(visible=False),  # Hide demo badge
+            gr.update(visible=True)    # Show quick wallet button
         )
     else:
         return (
@@ -2649,7 +2675,8 @@ def ui_login(image, passport, nationality, full_name, passport_expiry, occupatio
             f"🌿 {green_points}",
             "✅ ACCOUNT ACTIVE - All features available",
             "",  # QR input placeholder
-            gr.update(visible=False)  # Hide demo badge
+            gr.update(visible=False),  # Hide demo badge
+            gr.update(visible=False)   # Hide quick wallet button
         )
 
 def ui_create_wallet(card_number, expiry, cvv):
@@ -2797,15 +2824,18 @@ def ui_simulate_metro_scan():
     transaction_id = f"TXN-{random.randint(100000, 999999)}"
     return f"{result}\n📋 Transaction ID: {transaction_id}"
 
-def ui_book_transport(mode, dest):
-    """Book transportation with green points calculation"""
+def ui_book_transport(mode, dest, pax, bags):
+    """Book transportation with green points calculation and passenger/baggage pricing"""
     global current_user
     if not current_user: return "Login First"
+    
+    # Calculate cost: (25 * pax) + (5 * bags)
+    cost = (25 * int(pax)) + (5 * int(bags))
+    
     pts, lbl = EcoEngine.calculate_impact(mode)
-    cost = 25  # Enterprise pricing
-    if db.purchase(current_user[0], f"Ride: {mode}", cost, "TRANSPORT"):
+    if db.purchase(current_user[0], f"Transport: {mode} to {dest} ({pax} Pax, {bags} Bags)", cost, "TRANSPORT"):
         db.add_green_points(current_user[0], pts)
-        return f"✅ Booked {mode}. +{pts} Points."
+        return f"✅ Booked {mode} to {dest}. Cost: EGP {cost}. +{pts} Points."
     return "❌ No Funds"
 
 def ui_get_monument_info(monument_name):
@@ -3027,6 +3057,26 @@ def ui_demo_login():
         gr.update(visible=True)  # Show demo badge
     )
 
+def ui_top_up(amount):
+    """Top up wallet with real database backend integration"""
+    global current_user
+    
+    if not current_user: 
+        return "❌ Error: Not logged in", "---"
+    
+    try:
+        # Database Call - Add funds to wallet
+        new_balance = db.top_up(current_user[0], float(amount))
+        
+        # Refresh Global User State to get updated balance
+        current_user = db.get_traveler(current_user[0])
+        
+        # Return receipt message and updated balance
+        return f"✅ RECEIPT: Successfully added ${amount} (EGP {amount*50})", f"EGP {current_user[8]:,.2f}"
+    
+    except Exception as e:
+        return f"❌ Top-up failed: {str(e)}", f"EGP {current_user[8]:,.2f}"
+
 def ui_ai_chat_with_logging(msg, history):
     """Enterprise AI chat with interaction logging"""
     global current_user
@@ -3200,13 +3250,14 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
     with gr.Row():
         demo_badge = gr.Markdown("", visible=False)  # Hidden by default
     
-    # STATUS BAR WITH LANGUAGE SELECTOR
+        # STATUS BAR WITH LANGUAGE SELECTOR
     with gr.Row():
         status = gr.Textbox(label="Identity Status", value="Awaiting Biometrics")
         bal = gr.Textbox (label="Wallet Balance", value="---")
         score = gr.Textbox(label="Green Score", value="---")
         activation_status = gr.Textbox(label="Account Status", value="---")
         language_selector = gr.Dropdown(["English", "Arabic", "French", "German", "Russian"], label="Language", value="English")
+        btn_quick_wallet = gr.Button("💳 Quick Wallet", variant="secondary", visible=False)
         
     # ENTRY GATE - DEEP DATA UPGRADE (Sovereign Edition)
     with gr.Row():
@@ -3242,6 +3293,19 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
             purpose_of_travel = gr.Dropdown(["Tourism", "Business", "Official Visit", "Study", "Medical", "Transit"], label="Purpose of Travel", value="Tourism")
             accommodation_address = gr.Textbox(label="Accommodation Address", placeholder="e.g. Cairo Marriott Hotel, Zamalek")
             
+            # Additional DEEP DATA FIELDS
+            gr.Markdown("**📋 Additional Travel Information**")
+            with gr.Row():
+                passport_issue_date = gr.Textbox(label="Passport Issue Date (YYYY-MM-DD)", placeholder="2020-01-01")
+                transport_mode = gr.Dropdown(["Commercial", "Private", "Charter"], label="Transport Mode", value="Commercial")
+            with gr.Row():
+                accommodation_type = gr.Dropdown(["Hotel", "Apartment", "Resort", "Hostel", "Other"], label="Accommodation Type", value="Hotel")
+                departure_mode = gr.Dropdown(["Air", "Sea", "Land"], label="Departure Mode", value="Air")
+            with gr.Row():
+                departure_flight = gr.Textbox(label="Departure Flight Number", placeholder="MS124")
+                visa_no = gr.Textbox(label="Visa Number", placeholder="TBD")
+                issued_by = gr.Textbox(label="Issued By", placeholder="TBD")
+            
             with gr.Row():
                 btn = gr.Button("SCAN FACE & ENTER ECOSYSTEM", variant="primary")
                 btn_demo = gr.Button("🔑 DEMO ACCESS (Bypass Bio)", variant="secondary")
@@ -3274,16 +3338,20 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
             # 2. TRANSPORT (REAL EGYPT MODE)
             with gr.TabItem("🚕 Mobility"):
                 gr.Markdown("### 4.D Booking & 4.E Eco-Travel")
-                mode = gr.Dropdown([
-                    "Cairo Monorail", "LRT (Electric Train)", "Electric Bus",
-                    "Metro Line 1", "Metro Line 2", "Metro Line 3",
-                    "Gas-Powered Taxi", "Private Car", "Online Ride-Hailing",
-                    "Shared Shuttle", "Train", "Airport Transfer"
-                ], label="Mode")
-                dest = gr.Textbox(label="Destination", placeholder="e.g. Pyramids")
+                with gr.Row():
+                    mode = gr.Dropdown([
+                        "Cairo Monorail", "LRT (Electric Train)", "Electric Bus",
+                        "Metro Line 1", "Metro Line 2", "Metro Line 3",
+                        "Gas-Powered Taxi", "Private Car", "Online Ride-Hailing",
+                        "Shared Shuttle", "Train", "Airport Transfer"
+                    ], label="Mode")
+                    dest = gr.Textbox(label="Destination", placeholder="e.g. Pyramids")
+                with gr.Row():
+                    pax = gr.Number(minimum=1, value=1, label="Passengers", precision=0)
+                    bags = gr.Number(minimum=0, value=0, label="Bags", precision=0)
                 btn_tr = gr.Button("Book Ride")
                 out_tr = gr.Textbox(label="Receipt")
-                btn_tr.click(ui_book_transport, inputs=[mode, dest], outputs=[out_tr])
+                btn_tr.click(ui_book_transport, inputs=[mode, dest, pax, bags], outputs=[out_tr])
             
             # 3. MONUMENTS (FAMILY MODE)
             with gr.TabItem("🏛️ Monuments"):
@@ -3309,24 +3377,18 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
 
             # 4. WALLET & BANKING
             with gr.TabItem("💳 Wallet & Banking"):
-                gr.Markdown("### Enterprise Wallet Management & Banking Services")
+                gr.Markdown("### 💳 Enterprise Wallet")
                 with gr.Row():
-                    with gr.Column():
-                        gr.Markdown("**Bank Linking**")
-                        bank_dropdown = gr.Dropdown(["X-Bank", "InstaPay", "Bank of Egypt", "CIB"], label="Select Bank")
-                        btn_bank = gr.Button("Link Bank Account")
-                        out_bank = gr.Textbox(label="Bank Status")
-                        btn_bank.click(ui_link_bank, inputs=[bank_dropdown], outputs=[out_bank])
-                    with gr.Column():
-                        gr.Markdown("**Wallet Info**")
-                        wallet_info = gr.Textbox(label="Account Details", interactive=False)
-                        refresh_btn = gr.Button("Refresh Balance")
-                        refresh_btn.click(lambda: f"Status: {current_user[9] if current_user else 'N/A'}", outputs=[wallet_info])
-                        
-                        gr.Markdown("**Quick Actions**")
-                        btn_instapay = gr.Button("🔗 Open InstaPay App", variant="secondary")
-                        instapay_status = gr.Textbox(label="InstaPay Status")
-                        btn_instapay.click(lambda: "🔄 Redirecting to InstaPay App...", outputs=[instapay_status])
+                    gr.Textbox(label="Linked Payment Method", value="VISA **** 1234 (Foreign)", interactive=False)
+                    gr.Textbox(label="Status", value="ACTIVE", interactive=False)
+                
+                gr.Markdown("### 💰 Top Up Funds")
+                with gr.Row():
+                    topup_amount = gr.Number(label="Amount ($)", value=200, precision=0)
+                    btn_topup = gr.Button("Confirm Top-Up", variant="primary")
+                
+                topup_msg = gr.Textbox(label="Transaction Receipt")
+                btn_topup.click(ui_top_up, inputs=[topup_amount], outputs=[topup_msg, bal])
 
             # 5. SCAN & PAY - ENHANCED QR SCANNER
             with gr.TabItem("📷 Scan & Pay"):
@@ -3513,10 +3575,17 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
                 )
 
     # Event Wiring - 
-    btn.click(ui_login, inputs=[cam, passport, nat, full_name, passport_expiry, occupation, purpose_of_travel, accommodation_address, dob, gender, phone, arrival_date, country_boarded, flight_number, mode_of_arrival, departure_date], outputs=[status, app, activation_panel, bal, score, activation_status, qr_input, demo_badge])
+    btn.click(ui_login, inputs=[cam, passport, nat, full_name, passport_expiry, occupation, purpose_of_travel, accommodation_address, dob, gender, phone, arrival_date, country_boarded, flight_number, mode_of_arrival, departure_date, passport_issue_date, transport_mode, accommodation_type, departure_mode, departure_flight, visa_no, issued_by], outputs=[status, app, activation_panel, bal, score, activation_status, qr_input, demo_badge, btn_quick_wallet])
     btn_demo.click(ui_demo_login, outputs=[status, app, activation_panel, bal, score, activation_status, qr_input, demo_badge])
     language_selector.change(ui_change_language, inputs=[language_selector], outputs=[status])
     btn_activate.click(ui_create_wallet, inputs=[card_input, expiry_input, cvv_input], outputs=[activation_msg, app, activation_panel, bal, score, activation_status])
+    
+    # Quick Wallet Button Event
+    btn_quick_wallet.click(
+        fn=lambda: (gr.Group(visible=False), gr.Group(visible=True), "💳 Please complete your deposit."),
+        inputs=None,
+        outputs=[app, activation_panel, status]
+    )
 
 # ==============================================================================
 # 🚀 ENTERPRISE LAUNCH

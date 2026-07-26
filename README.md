@@ -15,6 +15,12 @@
   <img src="https://img.shields.io/badge/COMPLIANCE-EGYPTIAN_DATA_LAW-green?style=for-the-badge" alt="Compliance"/>
 </p>
 
+<p align="center">
+  <a href="https://colab.research.google.com/github/G3need/HORUS/blob/main/horus.py">
+    <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" height="32"/>
+  </a>
+</p>
+
 ---
 
 ## 📋 Executive Overview
@@ -31,7 +37,7 @@
 
 ## 🏗️ System Architecture
 
-HORUS operates as a **Sovereign Single-File Architecture (`HORUSv12.py`)**, maximizing auditability, deployment velocity, and cross-platform portability (Linux, Windows, Docker, Google Colab).
+HORUS operates as a **Sovereign Single-File Architecture (`horus.py`)**, maximizing auditability, deployment velocity, and cross-platform portability (Linux, Windows, Docker, Google Colab).
 
 ```mermaid
 graph TD
@@ -127,7 +133,7 @@ $env:GEMINI_KEYS="AIzaSyYourKey1...,AIzaSyYourKey2..."
 ### 3. Launch HORUS
 
 ```bash
-python HORUSv12.py
+python horus.py
 ```
 
 Open the generated local URL (e.g. `http://127.0.0.1:7860`) in your browser.

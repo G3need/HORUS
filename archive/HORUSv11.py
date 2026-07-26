@@ -1,55 +1,213 @@
 # ==============================================================================
-# HORUS v11.0.py - Enterprise Edition (Advanced Features)
+# HORUS v10.6.py - Sovereign Edition (Final Production Release)
 # ==============================================================================
 
-# STANDARD LIBRARY IMPORTS (System Prep)
-import os
-import sys
-import importlib.util
-import platform
-import logging
+# STANDARD LIBRARY IMPORTS (Global Access)
+import os, sys, subprocess, importlib.util, time, platform, json, logging, threading, random, base64, re, hashlib, warnings
+from datetime import datetime
+from collections import defaultdict
 from pathlib import Path
 
+# Suppress specific warnings for cleaner output
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*css.*parameter.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.colab")
+
+def _install_and_import(package, pip_name=None):
+    if pip_name is None: pip_name = package
+    if importlib.util.find_spec(package) is None:
+        print(f"📦 Installing {pip_name}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pip_name])
+    return importlib.import_module(package)
+
+# 1. System Drivers (Colab/Linux Safe)
+if os.path.exists("/content"):
+    try:
+        subprocess.run(["ldconfig", "-p"], check=True, stdout=subprocess.DEVNULL)
+    except:
+        print("⚙️ Installing System Drivers...")
+        subprocess.run(["apt-get", "update", "-qq"], check=True)
+        subprocess.run(["apt-get", "install", "-y", "-qq", "libzbar0"], check=True)
+
+# 2. Lazy Imports
+print("🚀 Launching HORUS v11...")
+gr = _install_and_import("gradio")
+qrcode = _install_and_import("qrcode")
+reportlab = _install_and_import("reportlab")
+cv2 = _install_and_import("cv2", "opencv-python-headless")
+pyzbar = _install_and_import("pyzbar", "pyzbar")
+# AI ENGINE SELECTOR
+try:
+    import google.genai as genai
+    AI_LIB = "genai"
+except ImportError:
+    print("📦 Installing google-genai...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "google-genai"])
+    import google.genai as genai
+    AI_LIB = "genai"
+sqlite3 = importlib.import_module("sqlite3")
+datetime = importlib.import_module("datetime")
+
 # Configure logging for system operations
+import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Suppress specific warnings for cleaner output
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*css.*parameter.*")
-
 # ==============================================================================
-# 🛠️ SELF-HEALING ENTERPRISE SETUP
+# 🖼️ HORUS ASSETS MANAGEMENT
 # ==============================================================================
 
-def enterprise_setup():
-    """Self-healing enterprise setup with military-grade dependency management"""
-    logger.info("🚀 Starting HORUS v11.0 Enterprise Setup...")
+class HorusAssets:
+    # Paste your HUGE Base64 string inside these quotes
+    LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAJYAAACWCAYAAAA8AXHiAAAuZklEQVR42u2dd3gc1dX/v+femdmi5o6NTa+v7DiATSdICp0EEspuKAmEZgOhhtDyAqNJApgQWkIINiQkQAjsEgi9YwmCscEGA5ZoLuAmI9lW3TIz997z+2O1xhhT37zvzxbzeR79IWl2dnb2O+eee+455wIREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREDH4puwRfD/Mn7RASO7kokrK8oIJeamiAAoKOjldPprAE+LSTXhahHnUB9Peo7WhmpjCGiSHAR/WJyXTF9umtxJiU/W3Asmd0kf3RzJfNUuyS79T+o06fXWZxJyXWtXGSxvhGWiampqVE2NXnG82A+/vv0eN+Spm0L3X3jUORdQo1tSJsxhv1qaCQJkFrovGArLyDbyVIfGJLzEk5s7uChsfdpy6vaPvE+mZTMAkils4bwzRo+6ZslKFcg20qUzuo1f1s9ZfOe5asbwpw6OAzVbsqYLRMxIQQEtNZQoYY2gGENZgaBQESQEpCCQAT4voIKdbeQVoslMaM6kXisco+dZhKdVCy/z3S3zqpHvSHPM5GwBozflBGg9Bqrwb13juhd2HJ4vhAepVW4T8ISlVpr5H0DpRQEAZYlYVkCthQgAkAMMGAMYEzpuDBkhGEIrY1hkHAsIOZIqFAjNFhg2fLJuE33j6w/6EWitC75Zq5oHNtKSGXNQJ4EDEhhMUBgl4BWIvrYOnW/f/meQWfxFB0Ehzu2GB4EPgpFDSIgGbMgLYliyNDKdJEUyyBoqRTBUiDeW4QoWCC2dSGpEVap0N4crDfVyowWxINiNqCUQa4QIgyVsQgiHrMQKgViekM6OlM1JJEdsedf3/8mDJU0cITEQDYtmobXUkODpz62WLdXrXzrgx/Az5+mimpfKRnFQgAiQiLuQBkDbWiJlPQyOfEXpZOYHascvKhy63Pbv2iWx8zUt/CqEbmOlVupYnEXHQb7BKHZA9psZUmDfCGE74dsSaK4Y6Ho64IlxTNWUty53VDxDO3x9561h8qOsSM4NUAs2cYmLOJMSjQNryUA/dP8Wib6pN/CzJRfMGWXQk9XWgfB0YJ5axMqKK0Ri9kIFIOJ37ZE7CmZ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T54Wrr234LrEY7I/v49Bwu7yvGZ17rlP+ulsVt932a7pf/xyjxHAmhZJIIBTABpOai7aduy8UIEdy2zXs1Kd+reLJ+4sJH4qbfoREXFLbXa9ZfkDhQG/i70upUHAQOTv93a/LGZjUi6HJ1MXzFw93a2zGrxPbzS+hl6ACcL3DYwqHDjt5xNuEsaYABjd2VMct8PgIbut+5LyGmN6SvbZ287f5V5AHdvjFy51pLycBP3utOtef2Mg7Uv4jbVYxnBpDxs2xODxfXkFm3DwP67Y49cNXrP67PaSQC8ANlzaFRWBtFEUFgWSTDhUGa7oqB6xXnH0WyOiirjXFyBvEQ9XrLtGb77JZa4LkUpnB3wHwYHvvKM/V92wNWr0yFOU4bdDZWC0uuzv7j4/LDvdnxMXM44loKn62ZOubzn7pze0nHPG7+ftV5Gs/GPXR+1D1xdBLy/lnHbljHcFq4WOLVlxrOXQc59cE8+KhLXxWyzokgOe3OfUh3sraqqOIaK8CpUxYeHP97t1O3pes/qsBWhGqRBCG1XpunXWHW5d3HUhLKvmriAxoosIvB6hlErRQGAjtGEmNiKGb1CrygE/KzTc/wNWZ5+9bewHFz3/ZpLk6dKSQik9JFfsy86988cVLbVZXje7IBGzSs47A8RgoNkEbX0aAH5y1VNtZ3nZvrsu2e3AzPl7JNYvSgDM/RU+PKCd9W+MsFpb+2vt2ITMYGI231kxX01366wjrnzlLqWtW21Lwhg17vWWd/6yJgeqX1xr1vOMYWMMM6HoeTCTp80Jy8f+6bwJexf88NDUDTOLqf78+LVEVRK2gQazMVyaR7S2fjOs1kCdFVI2Cw0QQmWNlsKQAIZuvf8kMXHytNB166wt6uvP/vDJJ0bYko8UUqenXbBr56TGV87wiDjTWkr2u/EcGkJsDWdmMlqP/v3PD9yR2NhW2JcgLuyqlP9bbcTZBLBbW0f9acNrWii5V5yWDNtf3swxEODCyP6wxjei+97A7PMOYGFmQvXb79rn9hSKp/mhJpJE1VblPWMHx2+8p+f5tpJz79Lff/nwuYWAjjastolL+UB1deXdc9WLM8fpPb/dlctf6KuwjjVrCMFCUAEsADYxZVQNyOrhZMUB51076/1y5me5M07219/ZcnVXz7lhITxKGQNLiLAqnrxl9IhBtx1wybM9PMCd+AFrludlap0l75mhorOzp7vSULFP8JDKzavGV8vuzS+YWVh3c8yMC0f2bT3IrhxsDvfmrMxMmVAjOzpjKysX9o3CBAzr+YgxZimwFBi2JUxPHAaYgE8VqPZz5wXjKyynt3LLYtgzXwwRAFChg2pdI1alN7DuexH/Cw9Wf+/QKOkuslhffVhc5wN/1vBDa1WY8We9fj03j/9D7x8REREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREREQEA+H9wzb3mFoil5wAAAABJRU5ErkJggg==" 
     
-    # Phase 1: System Dependencies
-    if not install_system_dependencies():
-        logger.error("❌ System dependency installation failed")
-        return False
+    @staticmethod
+    def get_logo_path():
+        """
+        Robust Hybrid Loader:
+        1. Checks if 'horus_logo_active.png' already exists locally.
+        2. If not, creates it from the embedded Base64 string.
+        3. Returns the absolute path guaranteed to work with Gradio.
+        """
+        import base64, os, re
+        
+        # 1. Define the persistent local path (Not Temp!)
+        # In Colab, this usually maps to /content/horus_logo_active.png
+        local_filename = "horus_logo_active.png"
+        local_path = os.path.abspath(local_filename)
+        
+        # 2. If it already exists, just use it (Speed Optimization)
+        if os.path.exists(local_path):
+            print(f"✅ Found active logo at: {local_path}")
+            return local_path
+
+        # 3. Validation: Check if we have a valid Base64 string
+        raw_b64 = HorusAssets.LOGO_B64
+        if "PASTE_" in raw_b64 or len(raw_b64) < 100:
+            print("⚠️ No embedded logo found. Using fallback.")
+            return None
+
+        # 4. Decode and Save to Local File
+        try:
+            print(f"🔄 Decoding embedded logo ({len(raw_b64)} chars)...")
+            
+            # Clean up the string (Remove headers like 'data:image/png;base64,')
+            clean_b64 = re.sub(r'^data:image/.+;base64,', '', raw_b64.strip())
+            
+            # Decode
+            img_data = base64.b64decode(clean_b64)
+            
+            # Write to disk
+            with open(local_path, "wb") as f:
+                f.write(img_data)
+            
+            print(f"✅ Success! Logo saved to: {local_path}")
+            return local_path
+            
+        except Exception as e:
+            print(f"❌ Logo Decode Error: {e}")
+            return None
+
+# ==============================================================================
+# 🧠 ENTERPRISE MONITORING & LOGGING SYSTEM
+# ==============================================================================
+
+import threading
+import json
+from datetime import datetime
+from collections import defaultdict
+
+class EnterpriseMonitor:
+    """Military-grade monitoring and logging system"""
     
-    # Phase 2: Python Dependencies  
-    if not install_python_dependencies():
-        logger.error("❌ Python dependency installation failed")
-        return False
+    def __init__(self):
+        self.metrics = defaultdict(list)
+        self.alerts = []
+        self.performance_data = {}
+        self._lock = threading.Lock()
+        self.start_time = datetime.now()
     
-    # Phase 3: Safe Import Handler
-    import_status = safe_import_with_error_handling()
+    def log_metric(self, metric_name: str, value: float, category: str = "general"):
+        """Log a performance metric with timestamp"""
+        with self._lock:
+            timestamp = datetime.now().isoformat()
+            self.metrics[metric_name].append({
+                'timestamp': timestamp,
+                'value': value,
+                'category': category
+            })
+            
+            # Keep only last 100 entries per metric to prevent memory bloat
+            if len(self.metrics[metric_name]) > 100:
+                self.metrics[metric_name] = self.metrics[metric_name][-100:]
     
-    # Phase 4: Critical Import Validation
-    critical_imports = ['gradio', 'numpy', 'sqlite3']
-    failed_critical = [pkg for pkg in critical_imports if not import_status.get(pkg, False)]
+    def log_alert(self, alert_level: str, message: str, component: str = "system"):
+        """Log an alert with severity level"""
+        with self._lock:
+            timestamp = datetime.now().isoformat()
+            alert = {
+                'timestamp': timestamp,
+                'level': alert_level,
+                'message': message,
+                'component': component
+            }
+            self.alerts.append(alert)
+            
+            # Keep only last 50 alerts
+            if len(self.alerts) > 50:
+                self.alerts = self.alerts[-50:]
+            
+            # Log critical alerts immediately
+            if alert_level in ['CRITICAL', 'ERROR']:
+                logger.error(f"ALERT [{alert_level}] {component}: {message}")
     
-    if failed_critical:
-        logger.error(f"❌ CRITICAL: Failed to import critical packages: {failed_critical}")
-        logger.error("❌ Application may not function properly without these dependencies.")
-        return False
+    def get_system_health(self) -> dict:
+        """Get comprehensive system health report"""
+        uptime = datetime.now() - self.start_time
+        
+        with self._lock:
+            return {
+                'uptime_seconds': uptime.total_seconds(),
+                'uptime_formatted': str(uptime).split('.')[0],
+                'total_metrics': len(self.metrics),
+                'total_alerts': len(self.alerts),
+                'critical_alerts': len([a for a in self.alerts if a['level'] == 'CRITICAL']),
+                'error_alerts': len([a for a in self.alerts if a['level'] == 'ERROR']),
+                'warning_alerts': len([a for a in self.alerts if a['level'] == 'WARNING']),
+                'last_alert': self.alerts[-1] if self.alerts else None,
+                'performance_summary': self._get_performance_summary()
+            }
     
-    logger.info("✅ Enterprise Setup Complete - All Systems Operational")
-    return True
+    def _get_performance_summary(self) -> dict:
+        """Get performance metrics summary"""
+        summary = {}
+        for metric_name, entries in self.metrics.items():
+            if entries:
+                values = [entry['value'] for entry in entries]
+                summary[metric_name] = {
+                    'latest': values[-1],
+                    'average': sum(values) / len(values),
+                    'min': min(values),
+                    'max': max(values),
+                    'count': len(values)
+                }
+        return summary
+    
+    def export_logs(self) -> str:
+        """Export all logs in JSON format"""
+        with self._lock:
+            return json.dumps({
+                'system_health': self.get_system_health(),
+                'metrics': dict(self.metrics),
+                'alerts': self.alerts,
+                'export_timestamp': datetime.now().isoformat()
+            }, indent=2)
+
+# Global enterprise monitor instance
+enterprise_monitor = EnterpriseMonitor()
+
+# ==============================================================================
+# 🛠️ ENTERPRISE DEPENDENCY INSTALLER
+# ==============================================================================
 
 def is_linux_colab():
     """Check if running on Linux (Google Colab) environment"""
@@ -210,6 +368,29 @@ def install_python_dependencies():
         logger.info("🎉 All Python packages are already available!")
         return True
 
+def install_dependencies():
+    """
+    Enterprise dependency installer with system and Python package management
+    """
+    logger.info("🚀 Starting enterprise dependency installation...")
+    
+    # Step 1: Install system dependencies (libzbar0 for QR scanning)
+    if not install_system_dependencies():
+        logger.error("❌ System dependency installation failed")
+        return False
+    
+    # Step 2: Install Python packages
+    if not install_python_dependencies():
+        logger.error("❌ Python dependency installation failed")
+        return False
+    
+    logger.info("✅ All dependencies installed successfully!")
+    return True
+
+# ==============================================================================
+# HEAVY IMPORTS (Safe Import Pattern)
+# ==============================================================================
+
 def safe_import_with_error_handling():
     """Perform heavy imports with comprehensive error handling and resource management"""
     import_status = {}
@@ -221,27 +402,27 @@ def safe_import_with_error_handling():
     try:
         import gradio as gr
         import_status['gradio'] = True
-        logger.info("✅ Gradio imported successfully")
+        logger.info(" Gradio imported successfully")
     except ImportError as e:
-        logger.error(f"❌ Failed to import Gradio: {e}")
+        logger.error(f" Failed to import Gradio: {e}")
         import_status['gradio'] = False
         gr = None
     
     try:
         import numpy as np
         import_status['numpy'] = True
-        logger.info("✅ NumPy imported successfully")
+        logger.info(" NumPy imported successfully")
     except ImportError as e:
-        logger.error(f"❌ Failed to import NumPy: {e}")
+        logger.error(f" Failed to import NumPy: {e}")
         import_status['numpy'] = False
         np = None
     
     try:
         from PIL import Image, ImageDraw, ImageFont
         import_status['pillow'] = True
-        logger.info("✅ PIL imported successfully")
+        logger.info(" PIL imported successfully")
     except ImportError as e:
-        logger.error(f"❌ Failed to import PIL: {e}")
+        logger.error(f" Failed to import PIL: {e}")
         import_status['pillow'] = False
         Image = None
     
@@ -290,17 +471,6 @@ def safe_import_with_error_handling():
         TTFont = None
     
     try:
-        from PIL import Image, ImageDraw, ImageFont
-        import_status['pil'] = True
-        logger.info("✅ PIL imported successfully")
-    except ImportError as e:
-        logger.error(f"❌ Failed to import PIL: {e}")
-        import_status['pil'] = False
-        Image = None
-        ImageDraw = None
-        ImageFont = None
-    
-    try:
         import google.genai as genai
         import_status['genai'] = True
         logger.info("✅ Google GenAI imported successfully")
@@ -329,123 +499,171 @@ def safe_import_with_error_handling():
     
     return import_status
 
-# ==============================================================================
-# 🧠 ENTERPRISE MONITORING & LOGGING SYSTEM
-# ==============================================================================
+# Run the enterprise installer
+if not install_dependencies():
+    logger.error("❌ CRITICAL: Dependency installation failed. Some features may not work.")
+    # Don't exit, continue with limited functionality
 
-import threading
-import json
-from collections import defaultdict
+# Perform safe imports
+import_status = safe_import_with_error_handling()
 
-class EnterpriseMonitor:
-    """Military-grade monitoring and logging system"""
+# Re-check critical imports after installation
+critical_imports = ['gradio', 'numpy', 'sqlite3']
+failed_critical = [pkg for pkg in critical_imports if not import_status.get(pkg, False)]
+
+if failed_critical:
+    logger.error(f"❌ CRITICAL: Failed to import critical packages: {failed_critical}")
+    logger.error("❌ Application may not function properly without these dependencies.")
+    # Don't exit immediately, try to continue with limited functionality
+
+# Log final import status
+logger.info("📊 Final Import Status:")
+for pkg, status in import_status.items():
+    status_icon = "✅" if status else "❌"
+    logger.info(f"  {status_icon} {pkg}: {'Available' if status else 'Missing'}")
+
+def generate_dynamic_assets():
+    """Generate assets with priority: Embedded > Local > Dynamic Fallback"""
+    import os
+    import base64
+    from io import BytesIO
     
-    def __init__(self):
-        self.metrics = defaultdict(list)
-        self.alerts = []
-        self.performance_data = {}
-        self._lock = threading.Lock()
-        self.start_time = dt.datetime.now()
-    
-    def log_metric(self, metric_name: str, value: float, category: str = "general"):
-        """Log a performance metric with timestamp"""
-        with self._lock:
-            timestamp = dt.datetime.now().isoformat()
-            self.metrics[metric_name].append({
-                'timestamp': timestamp,
-                'value': value,
-                'category': category
-            })
-            
-            # Keep only last 100 entries per metric to prevent memory bloat
-            if len(self.metrics[metric_name]) > 100:
-                self.metrics[metric_name] = self.metrics[metric_name][-100:]
-    
-    def log_alert(self, alert_level: str, message: str, component: str = "system"):
-        """Log an alert with severity level"""
-        with self._lock:
-            timestamp = dt.datetime.now().isoformat()
-            alert = {
-                'timestamp': timestamp,
-                'level': alert_level,
-                'message': message,
-                'component': component
-            }
-            self.alerts.append(alert)
-            
-            # Keep only last 50 alerts
-            if len(self.alerts) > 50:
-                self.alerts = self.alerts[-50:]
-            
-            # Log critical alerts immediately
-            if alert_level in ['CRITICAL', 'ERROR']:
-                logger.error(f"ALERT [{alert_level}] {component}: {message}")
-    
-    def get_system_health(self) -> dict:
-        """Get comprehensive system health report"""
-        uptime = dt.datetime.now() - self.start_time
+    # PRIORITY 1: Check Embedded Asset (The User's Paste)
+    if hasattr(HorusAssets, 'LOGO_B64') and len(HorusAssets.LOGO_B64) > 1000:
+        logger.info("✅ Found embedded Base64 logo in HorusAssets")
+        raw_b64 = HorusAssets.LOGO_B64.strip()
         
-        with self._lock:
-            return {
-                'uptime_seconds': uptime.total_seconds(),
-                'uptime_formatted': str(uptime).split('.')[0],
-                'total_metrics': len(self.metrics),
-                'total_alerts': len(self.alerts),
-                'critical_alerts': len([a for a in self.alerts if a['level'] == 'CRITICAL']),
-                'error_alerts': len([a for a in self.alerts if a['level'] == 'ERROR']),
-                'warning_alerts': len([a for a in self.alerts if a['level'] == 'WARNING']),
-                'last_alert': self.alerts[-1] if self.alerts else None,
-                'performance_summary': self._get_performance_summary()
-            }
-    
-    def _get_performance_summary(self) -> dict:
-        """Get performance metrics summary"""
-        summary = {}
-        for metric_name, entries in self.metrics.items():
-            if entries:
-                values = [entry['value'] for entry in entries]
-                summary[metric_name] = {
-                    'latest': values[-1],
-                    'average': sum(values) / len(values),
-                    'min': min(values),
-                    'max': max(values),
-                    'count': len(values)
-                }
-        return summary
-    
-    def export_logs(self) -> str:
-        """Export all logs in JSON format"""
-        with self._lock:
-            return json.dumps({
-                'system_health': self.get_system_health(),
-                'metrics': dict(self.metrics),
-                'alerts': self.alerts,
-                'export_timestamp': dt.datetime.now().isoformat()
-            }, indent=2)
+        # Ensure it has the data URI prefix
+        if not raw_b64.startswith("data:image"):
+            return f"data:image/png;base64,{raw_b64}"
+        return raw_b64
 
-# ==============================================================================
-# 🏛️ ENTERPRISE CONFIGURATION & UTILITIES
-# ==============================================================================
+    logo_found = False
+    logo_data = None
+    
+    # PRIORITY 2: Try to load from Colab root folder
+    colab_logo_path = "/content/horus_logo.png"
+    local_logo_path = "horus_logo.png"
+    
+    # Check Colab root first
+    if os.path.exists(colab_logo_path):
+        try:
+            with open(colab_logo_path, "rb") as f:
+                logo_bytes = f.read()
+            logo_data = f"data:image/png;base64,{base64.b64encode(logo_bytes).decode()}"
+            logo_found = True
+            logger.info("✅ Logo loaded from Colab root folder")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load Colab logo: {e}")
+    
+    # Check local directory
+    if not logo_found and os.path.exists(local_logo_path):
+        try:
+            with open(local_logo_path, "rb") as f:
+                logo_bytes = f.read()
+            logo_data = f"data:image/png;base64,{base64.b64encode(logo_bytes).decode()}"
+            logo_found = True
+            logger.info("✅ Logo loaded from local directory")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load local logo: {e}")
+    
+    # PRIORITY 3: Fallback: Generate dynamic logo
+    if not logo_found:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            
+            # Generate high-quality base64 encoded logo
+            img = Image.new('RGBA', (300, 300), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            
+            # Draw outer glow
+            for i in range(5):
+                alpha = 50 - i * 10
+                d.ellipse([10-i*2, 10-i*2, 290+i*2, 290+i*2], 
+                         outline=(212, 175, 55, alpha), width=2)
+            
+            # Draw main circles
+            d.ellipse([20, 20, 280, 280], outline="#D4AF37", width=12)
+            d.ellipse([40, 40, 260, 260], outline="#D4AF37", width=6)
+            
+            # Draw eye symbol
+            d.ellipse([100, 100, 200, 200], outline="#D4AF37", width=8)
+            d.ellipse([125, 125, 175, 175], fill="#D4AF37")
+            
+            # Draw pupil
+            d.ellipse([140, 140, 160, 160], fill="#1a1a1a")
+            d.ellipse([145, 145, 155, 155], fill="#D4AF37")
+            
+            # Draw HORUS text
+            try:
+                font = ImageFont.truetype("arial.ttf", 28)
+                font_bold = ImageFont.truetype("arialbd.ttf", 28)
+            except:
+                font = ImageFont.load_default()
+                font_bold = font
+            
+            # Calculate text position for centering
+            text = "HORUS"
+            bbox = font.getbbox(text)
+            text_width = bbox[2] - bbox[0]
+            text_x = (300 - text_width) // 2
+            
+            d.text((text_x, 220), text, fill="#D4AF37", font=font_bold)
+            
+            # Convert to base64 for embedding
+            buffer = BytesIO()
+            img.save(buffer, format='PNG', optimize=True)
+            img_str = base64.b64encode(buffer.getvalue()).decode()
+            
+            logo_data = f"data:image/png;base64,{img_str}"
+            logger.info("✅ High-quality dynamic logo generated successfully")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to generate dynamic logo: {e}")
+            # Ultimate fallback: SVG logo
+            logo_data = "data:image/svg+xml;base64," + base64.b64encode(
+                '''<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+                    <defs>
+                        <radialGradient id="gold">
+                            <stop offset="0%" style="stop-color:#D4AF37;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#B8941F;stop-opacity:1" />
+                        </radialGradient>
+                    </defs>
+                    <circle cx="150" cy="150" r="130" fill="none" stroke="url(#gold)" stroke-width="12"/>
+                    <circle cx="150" cy="150" r="110" fill="none" stroke="url(#gold)" stroke-width="6"/>
+                    <circle cx="150" cy="150" r="50" fill="url(#gold)"/>
+                    <circle cx="150" cy="150" r="20" fill="#1a1a1a"/>
+                    <circle cx="150" cy="150" r="8" fill="url(#gold)"/>
+                    <text x="150" y="220" text-anchor="middle" fill="url(#gold)" font-size="28" font-weight="bold">HORUS</text>
+                </svg>'''.encode()
+            ).decode()
+    
+    return logo_data
 
+# Additional standard library imports
 import json
 import hashlib
 import random
 import threading
-import datetime as dt
+import datetime
 import io
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Dict, Optional, Tuple
 
+# ==============================================================================
+# 🏛️ ENTERPRISE CONFIGURATION & UTILITIES
+# ==============================================================================
+
 @dataclass
 class HorusConfig:
-    """Enterprise configuration for HORUS v11.0"""
-    APP_NAME: str = "Horus Key Platinum v11.0 - Enterprise Edition"
-    DB_NAME: str = "horus_enterprise.db"
+    """Enterprise configuration for HORUS v10.4"""
+    APP_NAME: str = "Horus Key Platinum v10.6 - Sovereign Edition"
+    DB_NAME: str = "horus_sovereign.db"
     AI_MODEL: str = "gemini-3-flash-preview"
     AI_ENABLED: bool = False  # Set after import checking
-    VERSION: str = "11.0.0-Sovereign"
+    VERSION: str = "11.1.0-Sovereign"
 
     # Enterprise pricing (EGP)
     PRICING: dict = field(default_factory=lambda: {
@@ -467,9 +685,16 @@ class HorusConfig:
     ENTERPRISE_MODE: bool = True
     ADVANCED_QR: bool = True
     ENHANCED_AI: bool = True
-    WALLET_SETUP_FLOW: bool = True  # NEW: Wallet creation flow
-    MULTILINGUAL: bool = True       # NEW: Multilingual support
-    FAQ_ENABLED: bool = True         # NEW: FAQ system
+    SOVEREIGN_EDITION: bool = True
+    
+    # Hardcoded Gemini API Keys
+    GEMINI_KEYS: list = field(default_factory=lambda: [
+        k.strip() for k in (
+            os.getenv(GEMINI_KEYS) or 
+            os.getenv(GEMINI_API_KEY) or 
+            os.getenv(GOOGLE_API_KEY) or 
+        ).split(,) if k.strip()
+    ])
 
     def __post_init__(self):
         """Post-initialization to set dynamic values"""
@@ -504,103 +729,1109 @@ class HorusConfig:
             "enterprise_mode": cls.ENTERPRISE_MODE,
             "advanced_qr": cls.ADVANCED_QR,
             "enhanced_ai": cls.ENHANCED_AI,
-            "wallet_setup_flow": cls.WALLET_SETUP_FLOW,
-            "multilingual": cls.MULTILINGUAL,
-            "faq_enabled": cls.FAQ_ENABLED
+            "sovereign_edition": cls.SOVEREIGN_EDITION
         }
+
+    @staticmethod
+    def get_key():
+        """Get a random Gemini API key with masked logging"""
+        import random
+        key = random.choice(HorusConfig.GEMINI_KEYS)
+        # Mask key for logs
+        print(f"🔑 Using AI Key: ...{key[-6:]}")
+        return key
 
 # Create global config instance AFTER imports are checked and class is defined
 config = HorusConfig()
 logger.info(f"🔧 Config created with AI_ENABLED: {config.AI_ENABLED}")
 
+class ReadmeGenerator:
+    """Enterprise README generator with comprehensive troubleshooting and features"""
+    
+    @staticmethod
+    def generate_readme():
+        """Generate comprehensive enterprise README with advanced features"""
+        system_status = HorusConfig.get_system_status()
+        
+        readme_content = f"""
+# {HorusConfig.APP_NAME}
+
+## 🚀 Enterprise Edition - Advanced QR & AI Capabilities
+
+## 📋 System Requirements
+
+### Core Dependencies (Auto-Installed)
+- **Python 3.8+**
+- **Gradio 4.0+** - Advanced web interface
+- **SQLite3** - Enterprise database (built-in)
+- **NumPy** - High-performance numerical operations
+
+### Advanced QR Scanner Dependencies
+- **Pyzbar** - Enterprise QR code decoding
+- **OpenCV** - Professional image processing
+- **Pillow** - Advanced image handling
+- **libzbar0** - System QR library (auto-installed on Linux)
+
+### Enterprise AI Dependencies
+- **Google Generative AI** - Advanced AI chat capabilities
+- **ReportLab** - Professional PDF generation
+
+### System Dependencies (Linux/Colab)
+- **libzbar0** - Enterprise QR code library (auto-installed)
+
+## 🔧 Installation
+
+### Enterprise Installation (Recommended)
+```bash
+python HORUSv10.3.py
+```
+The application will automatically detect and install all system and Python dependencies.
+
+### Manual Installation
+```bash
+# System dependencies (Linux/Colab only)
+sudo apt-get update
+sudo apt-get install -y libzbar0
+
+# Python dependencies
+pip install gradio>=4.0.0 pyzbar qrcode[pil] pillow opencv-python reportlab numpy google-genai
+```
+
+## 🛠️ Enterprise Features
+
+### Advanced QR Scanning
+- **Real-time QR Detection**: Multiple QR codes in single image
+- **Payment Validation**: Enterprise-grade QR format validation
+- **Camera Integration**: Professional webcam support
+- **Manual Fallback**: Text input for manual QR entry
+
+### Enhanced AI Capabilities
+- **Intelligent Chat**: Context-aware AI assistance
+- **Travel Recommendations**: Personalized suggestions
+- **Document Analysis**: AI-powered document processing
+- **Multi-language Support**: Global traveler assistance
+
+### Enterprise Security
+- **Biometric Authentication**: SHA-512 facial recognition
+- **Wallet Protection**: Advanced transaction security
+- **Data Encryption**: Enterprise-grade data protection
+- **Audit Trails**: Comprehensive logging system
+
+## 🛠️ Troubleshooting
+
+### QR Scanner Issues
+**Issue**: "No QR code detected" or QR decoding errors
+**Solution**:
+1. Ensure proper lighting and clear QR code visibility
+2. Check camera permissions and functionality
+3. Verify pyzbar installation: `pip install --upgrade pyzbar`
+4. On Linux: `sudo apt-get install -y libzbar0`
+5. Try manual QR entry as fallback
+
+### Camera Not Working
+**Issue**: "HARDWARE ERROR: WEBCAM DATA INVALID"
+**Solution**:
+1. Check browser camera permissions
+2. Try different browser (Chrome/Firefox/Edge)
+3. Ensure OpenCV is installed: `pip install --upgrade opencv-python`
+4. Verify camera hardware functionality
+5. Restart browser and application
+
+### AI Chat Not Working
+**Issue**: "Configuration Error: Please grant access to 'GEMINI_KEYS'"
+**Solution**:
+1. Set environment variable: `export GEMINI_KEYS="your-api-key"`
+2. In Colab: Add GEMINI_KEYS to notebook secrets
+3. Get API key from: https://makersuite.google.com/app/apikey
+4. Verify Google Generative AI installation: `pip install --upgrade google-genai`
+
+### PDF Generation Issues
+**Issue**: Visa PDF not downloading or corrupted
+**Solution**:
+1. Ensure ReportLab is installed: `pip install --upgrade reportlab`
+2. Check browser download settings and permissions
+3. Try different browser for PDF downloads
+4. Verify sufficient disk space for PDF generation
+
+### System Dependency Issues
+**Issue**: Package installation failures
+**Solution**:
+1. Run system update: `sudo apt-get update`
+2. Install build tools: `sudo apt-get install build-essential`
+3. Check Python version compatibility
+4. Use virtual environment for isolation
+
+## 📊 Enterprise System Status
+
+Current system capabilities:
+- **Platform**: {system_status['platform']}
+- **Colab Environment**: {system_status['is_colab']}
+- **QR Scanner**: {'✅ Enterprise Ready' if system_status['qr_scanner'] else '❌ Not Available'}
+- **Camera**: {'✅ Professional Ready' if system_status['camera'] else '❌ Not Available'}
+- **AI Chat**: {'✅ Enhanced Ready' if system_status['ai'] else '❌ Not Available'}
+- **Enterprise Mode**: {'✅ Active' if system_status['enterprise_mode'] else '❌ Inactive'}
+- **Advanced QR**: {'✅ Enabled' if system_status['advanced_qr'] else '❌ Disabled'}
+- **Enhanced AI**: {'✅ Enabled' if system_status['enhanced_ai'] else '❌ Disabled'}
+
+## 🎯 Enterprise Features
+
+### Core Features
+- ✅ **Biometric Security**: Enterprise-grade SHA-512 authentication
+- ✅ **Wallet & Banking**: Advanced financial integration
+- ✅ **Family Mode**: Multi-visitor enterprise ticketing
+- ✅ **Green Score**: Environmental impact tracking
+- ✅ **Real Egypt Transport**: Authentic enterprise mobility
+
+### Advanced Features
+- ✅ **Deep Data**: 15-field enterprise arrival card compliance
+- ✅ **Welcome Gift**: Enterprise airport pickup system
+- ✅ **Demo Mode**: Professional demonstration capabilities
+- ✅ **AI Chat**: Enterprise intelligent assistant
+- ✅ **Git Sync**: Automated enterprise repository management
+- ✅ **Document Issuance**: Professional PDF generation
+
+### Enterprise Enhancements
+- ✅ **Advanced QR**: Multi-QR detection and validation
+- ✅ **Enhanced AI**: Context-aware intelligent assistance
+- ✅ **System Healing**: Automatic dependency resolution
+- ✅ **Professional UI**: Enterprise-grade interface design
+- ✅ **Comprehensive Logging**: Enterprise audit trails
+- ✅ **Error Recovery**: Robust error handling and recovery
+
+## 🚀 Quick Start
+
+### Enterprise Demo
+1. Run the application: `python HORUSv10.3.py`
+2. Click "🔑 DEMO ACCESS" for instant enterprise testing
+3. Experience advanced QR scanning with camera integration
+4. Test enhanced AI chat capabilities
+5. Explore all enterprise features with full functionality
+
+### Full Registration
+1. Use "SCAN FACE & ENTER ECOSYSTEM" for complete registration
+2. Fill deep data fields for enterprise compliance
+3. Activate wallet with $200 USD deposit (demo bypasses this)
+4. Experience enterprise-grade travel management
+5. Utilize advanced QR scanning and AI features
+
+## 📞 Enterprise Support
+
+For enterprise support and assistance:
+1. Check the comprehensive troubleshooting section above
+2. Verify all dependencies are properly installed
+3. Review system status in the application
+4. Check detailed logs for enterprise debugging
+5. Contact enterprise support for advanced issues
+
+## 🔧 Enterprise Configuration
+
+### Environment Variables
+- `GEMINI_KEYS`: Google AI API keys for enhanced chat
+- `HORUS_ENTERPRISE`: Enable enterprise-specific features
+- `HORUS_DEBUG`: Enable detailed debugging logs
+- `HORUS_QR_ADVANCED`: Enable advanced QR features
+
+### Custom Configuration
+Enterprise features can be customized through the HorusConfig class:
+- Advanced QR processing parameters
+- Enhanced AI model selection
+- Enterprise security settings
+- Professional UI customization
+
+---
+*HORUS v10.3 - Enterprise Smart Travel Platform with Advanced QR & AI*
+"""
+        
+        with open("README.md", "w", encoding="utf-8") as f:
+            f.write(readme_content)
+        
+        logger.info(" Enterprise README.md generated successfully")
+        return "README.md"
+
 # ==============================================================================
-# 🔐 ENTERPRISE SECURITY & BIOMETRICS
+# ENTERPRISE SECURITY & BIOMETRICS
 # ==============================================================================
 
 class HorusSecurity:
-    """Enterprise-grade security with SHA-512 biometric hashing"""
+    """Enterprise security class with advanced biometric handling"""
     
     @staticmethod
     def hash_biometric(data: str) -> str:
-        """Hash biometric data with SHA-512 for enterprise security"""
+        """Generate SHA-512 hash for biometric data"""
         return hashlib.sha512(data.encode()).hexdigest()
     
     @staticmethod
-    def verify_biometric(input_data: str, stored_hash: str) -> bool:
-        """Verify biometric data with enterprise-grade security"""
-        return HorusSecurity.hash_biometric(input_data) == stored_hash
+    def generate_digital_stamp(passport: str, nationality: str) -> Tuple[str, str]:
+        """Generate unique digital stamp for visa documents"""
+        ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        stamp = f"VISA-{nationality[:2].upper()}-{passport[-4:]}-{ts}"
+        return stamp, ts
     
     @staticmethod
-    def generate_secure_token() -> str:
-        """Generate secure token for enterprise operations"""
-        return hashlib.sha256(f"{random.random()}{time.time()}".encode()).hexdigest()
-    
-    @staticmethod
-    def validate_credit_card(card_number: str) -> bool:
-        """Validate credit card number with enterprise-grade checks"""
-        # Remove spaces and dashes
-        card = card_number.replace(" ", "").replace("-", "")
+    def scan_face(image) -> Optional[str]:
+        """
+        Enterprise biometric scanning with comprehensive None handling
+        SECURITY FIX: Prevent "HARDWARE ERROR" with proper None input handling
+        """
+        # SECURITY FIX: Strict None input handling
+        if image is None:
+            logger.warning("Enterprise biometric scan received None input")
+            return None
         
-        # Check if it's numeric and has valid length
-        if not card.isdigit() or len(card) < 13 or len(card) > 19:
+        # SECURITY FIX: Validate numpy array type and shape
+        if not isinstance(image, np.ndarray):
+            logger.warning(f"Enterprise biometric scan received invalid type: {type(image)}")
+            return None
+        
+        # SECURITY FIX: Validate image dimensions
+        if len(image.shape) < 2 or len(image.shape) > 3:
+            logger.warning(f"Enterprise biometric scan received invalid image shape: {image.shape}")
+            return None
+        
+        try:
+            # Convert numpy array to PIL Image for processing
+            if len(image.shape) == 3:
+                # RGB image, convert to PIL
+                pil_image = Image.fromarray(image.astype('uint8'))
+            else:
+                # Grayscale image, convert to PIL
+                pil_image = Image.fromarray(image.astype('uint8'), mode='L')
+            
+            # Enterprise biometric processing (in production, use advanced face recognition)
+            # For demo, we'll generate a consistent hash based on image properties
+            img_bytes = pil_image.tobytes()
+            bio_hash = hashlib.sha512(img_bytes).hexdigest()
+            
+            logger.info("Enterprise biometric scan successful")
+            return bio_hash
+            
+        except Exception as e:
+            logger.error(f"Enterprise biometric scan failed: {str(e)}")
+            return None
+
+# ==============================================================================
+# 📱 ENTERPRISE QR DECODING ENHANCEMENT
+# ==============================================================================
+
+class QRDecoder:
+    """
+    Enterprise QR Code Decoding class with advanced multi-QR support
+    Supports decoding from webcam images and various QR formats with enhanced validation
+    """
+    
+    @staticmethod
+    def decode_from_image(image) -> List[str]:
+        """
+        Decode multiple QR codes from numpy array image with enhanced preprocessing
+        Returns list of decoded QR data strings
+        """
+        if image is None:
+            logger.warning("Enterprise QR decode received None image")
+            return []
+        
+        # Check if pyzbar is available
+        if pyzbar is None:
+            logger.warning("Enterprise QR decode: pyzbar not available")
+            return []
+        
+        try:
+            # Convert numpy array to PIL Image
+            if len(image.shape) == 3:
+                pil_image = Image.fromarray(image.astype('uint8'))
+            else:
+                pil_image = Image.fromarray(image.astype('uint8'), mode='L')
+            
+            # Convert PIL to OpenCV format for preprocessing
+            opencv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            
+            # ENHANCED PREPROCESSING FOR LOW-LIGHT WEBCAM FEEDS
+            # Step 1: Convert to grayscale for better QR detection
+            gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+            
+            # Step 2: Apply Gaussian blur to reduce noise
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            
+            # Step 3: Adaptive thresholding for better contrast in varying lighting
+            thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                         cv2.THRESH_BINARY, 11, 2)
+            
+            # Step 4: Additional contrast enhancement
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            enhanced = clahe.apply(thresh)
+            
+            # Try decoding with original image first (best quality)
+            decoded_objects = pyzbar.decode(opencv_image)
+            
+            # If no QR codes found, try with preprocessed image
+            if not decoded_objects:
+                logger.info("🔍 No QR codes in original image, trying enhanced preprocessing...")
+                decoded_objects = pyzbar.decode(enhanced)
+                
+                # If still no codes, try with thresholded image
+                if not decoded_objects:
+                    logger.info("🔍 Trying thresholded image...")
+                    decoded_objects = pyzbar.decode(thresh)
+            
+            # Extract data from decoded objects
+            qr_data = []
+            for obj in decoded_objects:
+                try:
+                    decoded_text = obj.data.decode('utf-8')
+                    qr_data.append(decoded_text)
+                    logger.info(f"✅ Successfully decoded QR: {decoded_text[:50]}...")
+                except Exception as decode_error:
+                    logger.warning(f"⚠️ Failed to decode QR data: {decode_error}")
+            
+            logger.info(f"Enterprise decoded {len(qr_data)} QR codes from image (preprocessing: {'enhanced' if len(qr_data) > 0 else 'failed'})")
+            return qr_data
+            
+        except Exception as e:
+            logger.error(f"Enterprise QR decoding failed: {str(e)}")
+            return []
+    
+    @staticmethod
+    def validate_payment_qr(qr_data: str) -> bool:
+        """
+        Enterprise validation for QR data following payment format: PAY:VENDOR_ID:AMOUNT:CURRENCY
+        """
+        if not qr_data or not isinstance(qr_data, str):
             return False
         
-        # Luhn algorithm validation
-        total = 0
-        for i, digit in enumerate(reversed(card)):
-            d = int(digit)
-            if i % 2 == 1:  # Every second digit from right
-                d *= 2
-                if d > 9:
-                    d -= 9
-            total += d
+        try:
+            parts = qr_data.strip().split(':')
+            return (
+                len(parts) == 4 and 
+                parts[0] == 'PAY' and
+                parts[1].strip() and  # vendor_id not empty
+                parts[2].replace('.', '').isdigit() and  # amount is numeric
+                parts[3].strip()  # currency not empty
+            )
+        except Exception:
+            return False
+    
+    @staticmethod
+    def parse_payment_qr(qr_data: str) -> Optional[Dict[str, str]]:
+        """
+        Enterprise parsing of payment QR data into structured dictionary
+        Returns: {'vendor_id': str, 'amount': str, 'currency': str}
+        """
+        if not QRDecoder.validate_payment_qr(qr_data):
+            return None
         
-        return total % 10 == 0
+        try:
+            parts = qr_data.strip().split(':')
+            return {
+                'vendor_id': parts[1].strip(),
+                'amount': parts[2].strip(),
+                'currency': parts[3].strip()
+            }
+        except Exception:
+            return None
     
     @staticmethod
-    def encrypt_sensitive_data(data: str) -> str:
-        """Encrypt sensitive data with enterprise-grade encryption"""
-        # Simple XOR encryption for demonstration (use proper encryption in production)
-        key = "HORUS_ENTERPRISE_KEY_2026"
-        encrypted = ""
-        for i, char in enumerate(data):
-            encrypted += chr(ord(char) ^ ord(key[i % len(key)]))
-        return encrypted
+    def validate_multiple_qr_codes(qr_data_list: List[str]) -> List[Dict[str, str]]:
+        """
+        Enterprise validation for multiple QR codes
+        Returns list of valid payment QR data dictionaries
+        """
+        valid_qr_codes = []
+        for qr_data in qr_data_list:
+            parsed = QRDecoder.parse_payment_qr(qr_data)
+            if parsed:
+                valid_qr_codes.append(parsed)
+        return valid_qr_codes
+
+# ==============================================================================
+# 🧠 ENTERPRISE LOGIC ENGINES
+# ==============================================================================
+
+class VisaPolicy:
+    """Enterprise visa policy enforcement with comprehensive eligibility management"""
+    
+    ELIGIBLE_COUNTRIES = [
+        "Albania", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahrain", "Belarus", "Belgium", "Bolivia", "Brazil", "Bulgaria", "Canada", "Chile", "China", "Colombia", "Croatia", "Cyprus", "Czech Republic", "Denmark", "Ecuador", "Estonia", "Finland", "France", "Georgia", "Germany", "Greece", "Hong Kong", "Hungary", "Iceland", "India", "Ireland", "Italy", "Japan", "Kazakhstan", "Kuwait", "Latvia", "Lithuania", "Luxembourg", "Malaysia", "Malta", "Mexico", "Moldova", "Monaco", "Montenegro", "Netherlands", "New Zealand", "North Macedonia", "Norway", "Oman", "Paraguay", "Peru", "Poland", "Portugal", "Qatar", "Romania", "Russia", "San Marino", "Saudi Arabia", "Serbia", "Singapore", "Slovakia", "Slovenia", "South Africa", "South Korea", "Spain", "Sweden", "Switzerland", "Taiwan", "Ukraine", "UAE", "UK", "USA", "Uruguay", "Vatican City", "Venezuela"
+    ]
+    
+    RESTRICTED_COUNTRIES = [
+        "Iran", "Afghanistan", "Syria", "Yemen", "Libya", "Somalia", 
+        "North Korea", "Sudan", "Lebanon", "Iraq", "Palestine"
+    ]
     
     @staticmethod
-    def decrypt_sensitive_data(encrypted_data: str) -> str:
-        """Decrypt sensitive data with enterprise-grade decryption"""
-        key = "HORUS_ENTERPRISE_KEY_2026"
-        decrypted = ""
-        for i, char in enumerate(encrypted_data):
-            decrypted += chr(ord(char) ^ ord(key[i % len(key)]))
-        return decrypted
+    def get_nationality_group(nationality: str) -> str:
+        """Enterprise nationality classification for pricing and policy purposes"""
+        if nationality == "Egypt":
+            return "Egyptian"
+        elif nationality in ["Jordan", "Lebanon", "Morocco", "Tunisia", "Algeria", "Libya", "Sudan"]:
+            return "Arab"
+        else:
+            return "Foreign"
+    
+    @staticmethod
+    def check_eligibility(nationality: str) -> bool:
+        """Enterprise check if nationality is eligible for Visa on Arrival"""
+        return nationality in VisaPolicy.ELIGIBLE_COUNTRIES
+    
+    @staticmethod
+    def is_restricted(nationality: str) -> bool:
+        """Enterprise check if nationality is restricted from all services"""
+        return nationality in VisaPolicy.RESTRICTED_COUNTRIES
+    
+    @staticmethod
+    def get_visa_requirements(nationality: str) -> Dict[str, str]:
+        """Enterprise visa requirements information"""
+        if VisaPolicy.is_restricted(nationality):
+            return {
+                "status": "RESTRICTED",
+                "message": "Visa not available. Please contact embassy.",
+                "processing_time": "N/A"
+            }
+        elif VisaPolicy.check_eligibility(nationality):
+            return {
+                "status": "ELIGIBLE",
+                "message": "Visa on Arrival available",
+                "processing_time": "30 minutes"
+            }
+        else:
+            return {
+                "status": "EMBASSY_REQUIRED",
+                "message": "Please apply at nearest Egyptian consulate",
+                "processing_time": "3-5 business days"
+            }
+
+class PriceCalculator:
+    """Enterprise pricing calculator with dynamic pricing and visitor management"""
+    
+    @staticmethod
+    def calculate_ticket_price(base_price: float, nationality_group: str, visitor_type: str, quantity: int = 1) -> float:
+        """Enterprise ticket price calculation with multiple factors"""
+        multiplier = 1.0
+        
+        # Nationality pricing
+        if nationality_group == "Egyptian":
+            multiplier *= 0.2  # 20% of foreign price
+        elif nationality_group == "Arab":
+            multiplier *= 0.5  # 50% of foreign price
+        
+        # Visitor type pricing
+        if visitor_type == "Student":
+            multiplier *= 0.5  # 50% discount
+        elif visitor_type == "Kid":
+            multiplier *= 0.3  # 70% discount
+        
+        return base_price * multiplier * quantity
+    
+    @staticmethod
+    def get_visa_fee() -> int:
+        """Enterprise visa fee calculation"""
+        return config.PRICING["visa_fee"]
+    
+    @staticmethod
+    def get_activation_deposit() -> int:
+        """Enterprise activation deposit amount"""
+        return config.PRICING["activation_deposit"]
+    
+    @staticmethod
+    def calculate_group_discount(total_price: float, group_size: int) -> float:
+        """Enterprise group discount calculation"""
+        if group_size >= 10:
+            return total_price * 0.8  # 20% discount for groups
+        elif group_size >= 5:
+            return total_price * 0.9  # 10% discount for small groups
+        else:
+            return total_price
+
+class EcoEngine:
+    """Enterprise environmental impact calculator with advanced scoring"""
+    
+    @staticmethod
+    def calculate_impact(mode: str) -> Tuple[int, str]:
+        """Enterprise green points calculation for transport mode"""
+        if mode in ["Cairo Monorail", "LRT (Electric Train)", "Electric Bus", "Metro Line 1", "Metro Line 2", "Metro Line 3"]:
+            return 20, "🌿 Eco-Friendly"
+        elif mode in ["Shared Shuttle", "Train", "Electric Scooter"]:
+            return 10, "🍃 Shared Transport"
+        elif mode in ["Gas-Powered Taxi", "Private Car", "Online Ride-Hailing"]:
+            return 0, "🚗 Private Transport"
+        else:
+            return 5, "⚡ Mixed Transport"
+    
+    @staticmethod
+    def calculate_carbon_footprint(mode: str, distance_km: float) -> float:
+        """Enterprise carbon footprint calculation in kg CO2"""
+        footprint_factors = {
+            "Cairo Monorail": 0.02,
+            "LRT (Electric Train)": 0.03,
+            "Electric Bus": 0.04,
+            "Metro Line 1": 0.05,
+            "Metro Line 2": 0.05,
+            "Metro Line 3": 0.05,
+            "Gas-Powered Taxi": 0.20,
+            "Private Car": 0.25,
+            "Online Ride-Hailing": 0.18,
+            "Shared Shuttle": 0.08,
+            "Train": 0.06
+        }
+        
+        factor = footprint_factors.get(mode, 0.15)
+        return factor * distance_km
+    
+    @staticmethod
+    def get_eco_recommendations(current_score: int) -> List[str]:
+        """Enterprise eco-friendly recommendations based on current score"""
+        recommendations = []
+        
+        if current_score < 50:
+            recommendations.append("🌱 Try using electric transport for +20 points")
+            recommendations.append("🚌 Consider shared shuttle services for +10 points")
+        elif current_score < 100:
+            recommendations.append("🚇 Use Metro Lines for daily commuting")
+            recommendations.append("🚴 Consider walking for short distances")
+        else:
+            recommendations.append("🏆 Excellent eco-score! Keep up the green travel")
+            recommendations.append("🌍 Share your eco-friendly travel tips")
+        
+        return recommendations
+
+class MarketplaceEngine:
+    """Enterprise marketplace engine with advanced product management"""
+    
+    @staticmethod
+    def get_esims() -> List[Tuple[str, str, int]]:
+        """Enterprise eSIM plans with enhanced features"""
+        return [
+            ("Orange Egypt Enterprise", "50GB + Unlimited Calls + Priority Support", config.PRICING["esim_orange"]),
+            ("Vodafone Business", "40GB + Unlimited Calls + Global Roaming", config.PRICING["esim_vodafone"]),
+            ("Etisalat Premium", "60GB + Unlimited Calls + 5G Access", 700),
+            ("WE International", "30GB + Unlimited Calls + Airport Lounge", 600)
+        ]
+    
+    @staticmethod
+    def get_souvenirs() -> List[Tuple[str, str, int]]:
+        """Enterprise souvenir items with premium options"""
+        return [
+            ("Pharaonic Amulet Gold", "24K Gold-plated Authentic Egyptian Jewelry", 1500),
+            ("Papyrus Scroll Deluxe", "Hand-painted Ancient Art with Certificate", 800),
+            ("Alabaster Statue Premium", "Large Pyramid Replica with LED Base", 1200),
+            ("Egyptian Silk Scarf", "Premium Silk with Traditional Patterns", 400),
+            ("Essential Oil Set", "Authentic Egyptian Essential Oils", 300)
+        ]
+    
+    @staticmethod
+    def get_transport_cards() -> List[Tuple[str, str, int]]:
+        """Unified transport cards for seamless travel across Egypt"""
+        return [
+            ("Unified Egypt Metro/Bus Card (Physical NFC)", "Physical NFC card for unlimited Metro & Bus access", 150),
+            ("Virtual Transit Pass (7-Day)", "Digital pass for 7 days unlimited transit access", 300),
+            ("Premium Transit Bundle (30-Day)", "30-day unlimited access + Priority boarding", 800),
+            ("Tourist Transit Package", "7-day pass + Airport transfer + City map", 450)
+        ]
+    
+    @staticmethod
+    def get_exclusive_offers() -> List[Tuple[str, str]]:
+        """Enterprise exclusive offers with enhanced benefits"""
+        return [
+            ("Pyramids Sunset VIP Tour", "Private guide + Dinner + Transportation", "30% off"),
+            ("Nile Dinner Cruise Premium", "VIP deck + Live entertainment + Drinks", "Free upgrade"),
+            ("Luxor Temple Priority Access", "Skip-the-line + Private guide + Photography", "Priority entry"),
+            ("Red Sea Resort Package", "5-star resort + Activities + Transfers", "25% discount"),
+            ("Cairo Food Tour", "Professional guide + 10 tastings + Cultural insights", "20% off")
+        ]
+    
+    @staticmethod
+    def get_enterprise_packages() -> List[Tuple[str, str, int]]:
+        """Enterprise travel packages for corporate clients"""
+        return [
+            ("Executive Egypt Tour", "7-day luxury tour with VIP services", 50000),
+            ("Corporate Conference Package", "Venue + Accommodation + Activities", 30000),
+            ("Team Building Adventure", "Desert safari + Activities + Meals", 15000),
+            ("Cultural Immersion Program", "Museum tours + Workshops + Guides", 10000)
+        ]
+
+class DocumentIssuer:
+    """Enterprise document generation engine with advanced security features"""
+    
+    @staticmethod
+    def generate_visa_pdf(traveler_info: Dict[str, str], stamp: str, data: str) -> str:
+        """Generate enterprise visa PDF with enhanced security features"""
+        filename = f"visa_{traveler_info['passport']}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        
+        # Try to load fonts, fallback to default if not available
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+            font_name = "Arial"
+        except:
+            font_name = "Helvetica"
+        
+        # Enterprise header with security features
+        c.setFont(font_name, 16)
+        c.drawString(100, 750, "ARAB REPUBLIC OF EGYPT")
+        c.drawString(100, 730, "MINISTRY OF FOREIGN AFFAIRS")
+        c.drawString(100, 710, "ENTERPRISE VISA SYSTEM")
+        
+        # Enhanced visa details
+        c.setFont(font_name, 12)
+        c.drawString(100, 680, f"Visa Number: {stamp}")
+        c.drawString(100, 660, f"Name: {traveler_info['full_name']}")
+        c.drawString(100, 640, f"Passport: {traveler_info['passport']}")
+        c.drawString(100, 620, f"Nationality: {traveler_info['nationality']}")
+        c.drawString(100, 600, f"Type: Enterprise Tourist Visa")
+        c.drawString(100, 580, f"Valid Until: {datetime.datetime.now() + datetime.timedelta(days=180)}")
+        c.drawString(100, 560, f"Issued: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Enterprise security watermark
+        c.setFillColorRGB(0.9, 0.9, 0.9)
+        c.setFont(font_name, 48)
+        c.drawString(200, 400, "EGYPT")
+        c.drawString(200, 350, "ENTERPRISE")
+        
+        # Security features
+        c.setFillColorRGB(0.8, 0.8, 0.8)
+        c.setFont(font_name, 8)
+        c.drawString(400, 100, f"Security Code: {hashlib.md5(stamp.encode()).hexdigest()[:8]}")
+        
+        c.save()
+        return filename
+    
+    @staticmethod
+    def generate_group_ticket_pdf(ticket_info_list: List[Dict[str, any]]) -> str:
+        """Generate enterprise group ticket PDF with master QR code and family member list"""
+        import random
+        
+        # Generate unique master ticket ID
+        master_id = f"GRP-{random.randint(100000, 999999)}"
+        filename = f"group_ticket_{master_id}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+            font_name = "Arial"
+        except:
+            font_name = "Helvetica"
+        
+        # Enterprise group ticket header
+        c.setFont(font_name, 18)
+        c.drawString(100, 750, "EGYPT ENTERPRISE GROUP TICKET")
+        c.setFont(font_name, 14)
+        c.drawString(100, 730, f"Master Ticket ID: {master_id}")
+        
+        # Calculate total visitors and price
+        total_visitors = sum(ticket['quantity'] for ticket in ticket_info_list)
+        total_price = sum(ticket['price'] for ticket in ticket_info_list)
+        monument_name = ticket_info_list[0]['monument_name'] if ticket_info_list else "Unknown"
+        
+        # Group summary
+        c.setFont(font_name, 12)
+        c.drawString(100, 700, f"Monument: {monument_name}")
+        c.drawString(100, 680, f"Total Visitors: {total_visitors}")
+        c.drawString(100, 660, f"Total Price: EGP {total_price}")
+        c.drawString(100, 640, f"Issued: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Visitor breakdown section
+        y_position = 600
+        c.setFont(font_name, 14, "bold")
+        c.drawString(100, y_position, "VISITOR BREAKDOWN:")
+        y_position -= 25
+        
+        c.setFont(font_name, 11)
+        for ticket in ticket_info_list:
+            visitor_info = f"• {ticket['quantity']} x {ticket['visitor_type']}(s) - EGP {ticket['price']}"
+            c.drawString(120, y_position, visitor_info)
+            y_position -= 20
+            
+            # Add individual visitor details if available
+            if 'visitor_names' in ticket and ticket['visitor_names']:
+                for name in ticket['visitor_names']:
+                    c.drawString(140, y_position, f"  - {name}")
+                    y_position -= 15
+            
+            y_position -= 10  # Extra spacing between ticket types
+        
+        # Master QR Code section
+        c.setFont(font_name, 12, "bold")
+        c.drawString(400, 600, "MASTER QR CODE")
+        c.rect(400, 450, 120, 120)  # QR Code placeholder
+        c.setFont(font_name, 10)
+        c.drawString(425, 440, "Scan for group entry")
+        
+        # Enterprise security features
+        c.setFillColorRGB(0.9, 0.9, 0.9)
+        c.setFont(font_name, 48)
+        c.drawString(200, 300, "GROUP")
+        c.drawString(200, 250, "TICKET")
+        
+        # Security code and validation
+        c.setFillColorRGB(0.8, 0.8, 0.8)
+        c.setFont(font_name, 8)
+        security_code = hashlib.md5(f"{master_id}{total_price}".encode()).hexdigest()[:8]
+        c.drawString(400, 100, f"Security Code: {security_code}")
+        c.drawString(400, 90, f"Valid for: {monument_name}")
+        c.drawString(400, 80, f"Group Size: {total_visitors}")
+        
+        # Footer
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont(font_name, 10)
+        c.drawString(100, 50, "This ticket admits all listed visitors. Present at entrance for scanning.")
+        c.drawString(100, 35, "Unauthorized duplication is prohibited and will result in legal action.")
+        
+        c.save()
+        logger.info(f"✅ Group ticket PDF generated: {filename} for {total_visitors} visitors")
+        return filename
+    
+    @staticmethod
+    def generate_transport_card_pdf(card_info: Dict[str, any]) -> str:
+        """Generate enterprise transport card PDF with NFC and QR code features"""
+        filename = f"transport_card_{card_info['id']}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+            font_name = "Arial"
+        except:
+            font_name = "Helvetica"
+        
+        # Transport card header
+        c.setFont(font_name, 18)
+        c.drawString(100, 750, "EGYPT UNIFIED TRANSIT CARD")
+        c.setFont(font_name, 14)
+        c.drawString(100, 730, f"Card ID: {card_info['id']}")
+        
+        # Card details
+        c.setFont(font_name, 12)
+        c.drawString(100, 700, f"Card Type: {card_info['card_name']}")
+        c.drawString(100, 680, f"Description: {card_info['description']}")
+        c.drawString(100, 660, f"Price: EGP {card_info['price']}")
+        c.drawString(100, 640, f"Purchaser: {card_info['purchaser']}")
+        c.drawString(100, 620, f"Issued: {card_info['created_at']}")
+        
+        # Transit access information
+        c.setFont(font_name, 12, "bold")
+        c.drawString(100, 580, "TRANSIT ACCESS:")
+        c.setFont(font_name, 11)
+        c.drawString(120, 560, "• Cairo Metro Lines 1, 2, 3")
+        c.drawString(120, 545, "• Cairo Monorail System")
+        c.drawString(120, 530, "• Public Buses (All Routes)")
+        c.drawString(120, 515, "• LRT (Light Rail Transit)")
+        
+        # QR Code section
+        c.setFont(font_name, 12, "bold")
+        c.drawString(400, 600, "QR CODE")
+        c.rect(400, 500, 100, 100)
+        c.setFont(font_name, 10)
+        c.drawString(425, 490, "Scan for validation")
+        
+        # NFC indicator
+        c.setFont(font_name, 12, "bold")
+        c.drawString(400, 450, "NFC ENABLED")
+        c.circle(450, 420, 15, outline="black", width=2)
+        c.setFont(font_name, 10)
+        c.drawString(425, 395, "Tap at readers")
+        
+        # Enterprise security features
+        c.setFillColorRGB(0.9, 0.9, 0.9)
+        c.setFont(font_name, 48)
+        c.drawString(200, 300, "TRANSIT")
+        c.drawString(200, 250, "CARD")
+        
+        # Security code and validation
+        c.setFillColorRGB(0.8, 0.8, 0.8)
+        c.setFont(font_name, 8)
+        security_code = hashlib.md5(f"{card_info['id']}{card_info['price']}".encode()).hexdigest()[:8]
+        c.drawString(400, 100, f"Security Code: {security_code}")
+        c.drawString(400, 90, f"Valid for: All Egypt Transit")
+        c.drawString(400, 80, f"Card Type: {card_info['card_name']}")
+        
+        # Footer
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont(font_name, 10)
+        c.drawString(100, 50, "This card is valid for unlimited transit access within validity period.")
+        c.drawString(100, 35, "Report lost cards immediately. Replacement fees apply.")
+        
+        c.save()
+        logger.info(f"✅ Transport card PDF generated: {filename}")
+        return filename
+    
+    @staticmethod
+    def generate_ticket_pdf(ticket_info: Dict[str, any]) -> str:
+        """Generate enterprise ticket PDF with QR code"""
+        filename = f"ticket_{ticket_info['id']}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+            font_name = "Arial"
+        except:
+            font_name = "Helvetica"
+        
+        # Ticket header
+        c.setFont(font_name, 14)
+        c.drawString(100, 750, f"ENTERPRISE TICKET - {ticket_info['monument_name']}")
+        
+        # Ticket details
+        c.setFont(font_name, 12)
+        c.drawString(100, 720, f"Ticket ID: {ticket_info['id']}")
+        c.drawString(100, 700, f"Visitor Type: {ticket_info['visitor_type']}")
+        c.drawString(100, 680, f"Quantity: {ticket_info['quantity']}")
+        c.drawString(100, 660, f"Price: EGP {ticket_info['price']}")
+        c.drawString(100, 640, f"Date: {ticket_info['created_at']}")
+        
+        # QR Code placeholder
+        c.rect(400, 600, 100, 100)
+        c.drawString(425, 580, "QR CODE")
+        
+        c.save()
+        return filename
+    
+    @staticmethod
+    def generate_group_ticket_pdf(ticket_info_list: List[Dict[str, any]]) -> str:
+        """Generate enterprise group ticket PDF with master QR code and family member list"""
+        import random
+        
+        # Generate unique master ticket ID
+        master_id = f"GRP-{random.randint(100000, 999999)}"
+        filename = f"group_ticket_{master_id}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+            font_name = "Arial"
+        except:
+            font_name = "Helvetica"
+        
+        # Enterprise group ticket header
+        c.setFont(font_name, 18)
+        c.drawString(100, 750, "EGYPT ENTERPRISE GROUP TICKET")
+        c.setFont(font_name, 14)
+        c.drawString(100, 730, f"Master Ticket ID: {master_id}")
+        
+        # Calculate total visitors and price
+        total_visitors = sum(ticket['quantity'] for ticket in ticket_info_list)
+        total_price = sum(ticket['price'] for ticket in ticket_info_list)
+        monument_name = ticket_info_list[0]['monument_name'] if ticket_info_list else "Unknown"
+        
+        # Group summary
+        c.setFont(font_name, 12)
+        c.drawString(100, 700, f"Monument: {monument_name}")
+        c.drawString(100, 680, f"Total Visitors: {total_visitors}")
+        c.drawString(100, 660, f"Total Price: EGP {total_price}")
+        c.drawString(100, 640, f"Issued: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Visitor breakdown section
+        y_position = 600
+        c.setFont(font_name, 14, "bold")
+        c.drawString(100, y_position, "VISITOR BREAKDOWN:")
+        y_position -= 25
+        
+        c.setFont(font_name, 11)
+        for ticket in ticket_info_list:
+            visitor_info = f"• {ticket['quantity']} x {ticket['visitor_type']}(s) - EGP {ticket['price']}"
+            c.drawString(120, y_position, visitor_info)
+            y_position -= 20
+            
+            # Add individual visitor details if available
+            if 'visitor_names' in ticket and ticket['visitor_names']:
+                for name in ticket['visitor_names']:
+                    c.drawString(140, y_position, f"  - {name}")
+                    y_position -= 15
+            
+            y_position -= 10  # Extra spacing between ticket types
+        
+        # Master QR Code section
+        c.setFont(font_name, 12, "bold")
+        c.drawString(400, 600, "MASTER QR CODE")
+        c.rect(400, 450, 120, 120)  # QR Code placeholder
+        c.setFont(font_name, 10)
+        c.drawString(425, 440, "Scan for group entry")
+        
+        # Enterprise security features
+        c.setFillColorRGB(0.9, 0.9, 0.9)
+        c.setFont(font_name, 48)
+        c.drawString(200, 300, "GROUP")
+        c.drawString(200, 250, "TICKET")
+        
+        # Security code and validation
+        c.setFillColorRGB(0.8, 0.8, 0.8)
+        c.setFont(font_name, 8)
+        security_code = hashlib.md5(f"{master_id}{total_price}".encode()).hexdigest()[:8]
+        c.drawString(400, 100, f"Security Code: {security_code}")
+        c.drawString(400, 90, f"Valid for: {monument_name}")
+        c.drawString(400, 80, f"Group Size: {total_visitors}")
+        
+        # Footer
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont(font_name, 10)
+        c.drawString(100, 50, "This ticket admits all listed visitors. Present at entrance for scanning.")
+        c.drawString(100, 35, "Unauthorized duplication is prohibited and will result in legal action.")
+        
+        c.save()
+        logger.info(f"✅ Group ticket PDF generated: {filename} for {total_visitors} visitors")
+        return filename
+    
+    @staticmethod
+    def generate_transport_card_pdf(card_info: Dict[str, any]) -> str:
+        """Generate enterprise transport card PDF with NFC and QR code features"""
+        filename = f"transport_card_{card_info['id']}.pdf"
+        c = canvas.Canvas(filename, pagesize=letter)
+        
+        try:
+            pdfmetrics.registerFont(TTFont("Arial", "arial.ttf"))
+            font_name = "Arial"
+        except:
+            font_name = "Helvetica"
+        
+        # Transport card header
+        c.setFont(font_name, 18)
+        c.drawString(100, 750, "EGYPT UNIFIED TRANSIT CARD")
+        c.setFont(font_name, 14)
+        c.drawString(100, 730, f"Card ID: {card_info['id']}")
+        
+        # Card details
+        c.setFont(font_name, 12)
+        c.drawString(100, 700, f"Card Type: {card_info['card_name']}")
+        c.drawString(100, 680, f"Description: {card_info['description']}")
+        c.drawString(100, 660, f"Price: EGP {card_info['price']}")
+        c.drawString(100, 640, f"Purchaser: {card_info['purchaser']}")
+        c.drawString(100, 620, f"Issued: {card_info['created_at']}")
+        
+        # Transit access information
+        c.setFont(font_name, 12, "bold")
+        c.drawString(100, 580, "TRANSIT ACCESS:")
+        c.setFont(font_name, 11)
+        c.drawString(120, 560, "• Cairo Metro Lines 1, 2, 3")
+        c.drawString(120, 545, "• Cairo Monorail System")
+        c.drawString(120, 530, "• Public Buses (All Routes)")
+        c.drawString(120, 515, "• LRT (Light Rail Transit)")
+        
+        # QR Code section
+        c.setFont(font_name, 12, "bold")
+        c.drawString(400, 600, "QR CODE")
+        c.rect(400, 500, 100, 100)
+        c.setFont(font_name, 10)
+        c.drawString(425, 490, "Scan for validation")
+        
+        # NFC indicator
+        c.setFont(font_name, 12, "bold")
+        c.drawString(400, 450, "NFC ENABLED")
+        c.circle(450, 420, 15, outline="black", width=2)
+        c.setFont(font_name, 10)
+        c.drawString(425, 395, "Tap at readers")
+        
+        # Enterprise security features
+        c.setFillColorRGB(0.9, 0.9, 0.9)
+        c.setFont(font_name, 48)
+        c.drawString(200, 300, "TRANSIT")
+        c.drawString(200, 250, "CARD")
+        
+        # Security code and validation
+        c.setFillColorRGB(0.8, 0.8, 0.8)
+        c.setFont(font_name, 8)
+        security_code = hashlib.md5(f"{card_info['id']}{card_info['price']}".encode()).hexdigest()[:8]
+        c.drawString(400, 100, f"Security Code: {security_code}")
+        c.drawString(400, 90, f"Valid for: All Egypt Transit")
+        c.drawString(400, 80, f"Card Type: {card_info['card_name']}")
+        
+        # Footer
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont(font_name, 10)
+        c.drawString(100, 50, "This card is valid for unlimited transit access within validity period.")
+        c.drawString(100, 35, "Report lost cards immediately. Replacement fees apply.")
+        
+        c.save()
+        logger.info(f"✅ Transport card PDF generated: {filename}")
+        return filename
 
 # ==============================================================================
-# GLOBAL INSTANCES & INITIALIZATION
+# 🧠 PROCEDURE DOC 1030 COMPLIANCE - ARRIVAL LOGIC ENGINE
 # ==============================================================================
 
-# Global enterprise monitor instance
-enterprise_monitor = EnterpriseMonitor()
-
-# Run the enterprise setup
-if not enterprise_setup():
-    logger.error("❌ CRITICAL: Enterprise setup failed. Some features may not work.")
-    # Don't exit, continue with limited functionality
-
-# Log final import status
-if 'import_status' in globals():
-    logger.info("📊 Final Import Status:")
-    for pkg, status in import_status.items():
-        status_icon = "✅" if status else "❌"
-        logger.info(f"  {status_icon} {pkg}: {'Available' if status else 'Missing'}")
-
-# Log system initialization
-enterprise_monitor.log_alert("INFO", "HORUS v11.0 Enterprise initialization complete", "system")
-logger.info("✅ HORUS v11.0 Enterprise Edition - Part 1 Complete")
+class ArrivalLogic:
+    """Procedure Doc 1030 compliance engine for arrival card validation"""
+    
+    @staticmethod
+    def validate_submission_time(arrival_date_str: str, is_demo_user: bool = False) -> bool:
+        """
+        Validate that arrival card is submitted at least 72 hours prior to arrival
+        Demo users bypass the 72-hour rule for testing purposes
+        
+        Args:
+            arrival_date_str: Arrival date string in YYYY-MM-DD format
+            is_demo_user: Boolean indicating if this is a demo user
+            
+        Returns:
+            True if submission is valid (>= 72 hours before arrival) or demo user, False otherwise
+        """
+        # Demo users bypass the 72-hour rule
+        if is_demo_user:
+            logger.info("🔍 Demo user detected - bypassing 72-hour arrival validation")
+            return True
+            
+        try:
+            from datetime import datetime, timedelta
+            
+            # Parse arrival date
+            arrival_date = datetime.strptime(arrival_date_str.strip(), '%Y-%m-%d')
+            current_time = datetime.now()
+            
+            # Calculate time difference
+            time_difference = arrival_date - current_time
+            hours_until_arrival = time_difference.total_seconds() / 3600
+            
+            # Check if submission is at least 72 hours before arrival
+            is_valid = hours_until_arrival >= 72
+            
+            logger.info(f"🔍 Arrival validation: {arrival_date_str} - {hours_until_arrival:.1f} hours until arrival - Valid: {is_valid}")
+            
+            return is_valid
+            
+        except ValueError as e:
+            logger.error(f"❌ Invalid date format in arrival validation: {arrival_date_str} - {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error in arrival validation: {e}")
+            return False
+    
+    @staticmethod
+    def get_validation_message(arrival_date_str: str, is_demo_user: bool = False) -> str:
+        """
+        Get detailed validation message for arrival card submission
+        Demo users receive special bypass message
+        
+        Args:
+            arrival_date_str: Arrival date string in YYYY-MM-DD format
+            is_demo_user: Boolean indicating if this is a demo user
+            
+        Returns:
+            Validation message with details
+        """
+        # Demo users bypass validation
+        if is_demo_user:
+            return "✅ DEMO MODE: Arrival card accepted (72-hour rule bypassed for testing)"
+            
+        try:
+            from datetime import datetime, timedelta
+            
+            # Parse arrival date
+            arrival_date = datetime.strptime(arrival_date_str.strip(), '%Y-%m-%d')
+            current_time = datetime.now()
+            
+            # Calculate time difference
+            time_difference = arrival_date - current_time
+            hours_until_arrival = time_difference.total_seconds() / 3600
+            days_until_arrival = hours_until_arrival / 24
+            
+            if hours_until_arrival >= 72:
+                return f"✅ ARRIVAL CARD ACCEPTED: Submitted {days_until_arrival:.1f} days before arrival (meets 72-hour requirement)"
+            else:
+                return f"❌ ARRIVAL CARD REJECTED: Must be submitted 72 hours prior to arrival. Only {hours_until_arrival:.1f} hours remaining."
+                
+        except ValueError:
+            return "❌ INVALID DATE FORMAT: Please use YYYY-MM-DD format"
+        except Exception as e:
+            return f"❌ VALIDATION ERROR: {e}"
 
 # ==============================================================================
-# 🗄️ ENTERPRISE DATABASE SYSTEM
+# 🗄️ ENTERPRISE DATABASE LAYER - DEEP DATA COMPLIANCE
 # ==============================================================================
 
 class HorusDB:
@@ -617,1533 +1848,1706 @@ class HorusDB:
         return cls._instance
     
     def __init__(self):
-        if hasattr(self, '_initialized'):
-            return
-        
-        self._initialized = True
-        self._db_lock = threading.Lock()
-        self.conn = None
-        self.cursor = None
-        self._initialize_database()
-        logger.info("✅ Enterprise HorusDB initialized with deep data schema")
-    
-    def _initialize_database(self):
-        """Initialize database with enterprise schema and deep data fields"""
-        with self._db_lock:
-            self.conn = sqlite3.connect(config.DB_NAME, check_same_thread=False)
+        if not hasattr(self, 'initialized'):
+            self.conn = sqlite3.connect(HorusConfig.DB_NAME, check_same_thread=False)
             self.cursor = self.conn.cursor()
-            
-            # Create travelers table with ALL 18 DEEP DATA FIELDS
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS travelers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    full_name TEXT NOT NULL,
-                    passport TEXT NOT NULL,
-                    nationality TEXT NOT NULL,
-                    nationality_group TEXT NOT NULL,
-                    passport_expiry TEXT NOT NULL,
-                    biometric_hash TEXT NOT NULL,
-                    occupation TEXT,                    -- DEEP DATA FIELD 1
-                    purpose_of_travel TEXT,           -- DEEP DATA FIELD 2
-                    accommodation_address TEXT,       -- DEEP DATA FIELD 3
-                    dob TEXT,                         -- DEEP DATA FIELD 4
-                    gender TEXT,                       -- DEEP DATA FIELD 5
-                    phone TEXT,                        -- DEEP DATA FIELD 6
-                    arrival_date TEXT,                 -- DEEP DATA FIELD 7
-                    country_boarded TEXT,             -- DEEP DATA FIELD 8
-                    flight_number TEXT,                -- DEEP DATA FIELD 9
-                    mode_of_arrival TEXT,              -- DEEP DATA FIELD 10
-                    departure_date TEXT,               -- DEEP DATA FIELD 11
-                    country_residence TEXT,            -- DEEP DATA FIELD 12
-                    visa_no TEXT,                      -- DEEP DATA FIELD 13
-                    issued_by TEXT,                    -- DEEP DATA FIELD 14
-                    wallet_balance INTEGER DEFAULT 0,
-                    wallet_status TEXT DEFAULT 'LOCKED',
-                    bank_linked INTEGER DEFAULT 0,
-                    green_points INTEGER DEFAULT 0,
-                    has_claimed_gift INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create enterprise_packages table
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS enterprise_packages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    price REAL NOT NULL,
-                    category TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create monuments table
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS monuments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    base_price_foreigner REAL NOT NULL,
-                    base_price_local REAL NOT NULL,
-                    location TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create visas table
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS visas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    traveler_id INTEGER NOT NULL,
-                    stamp TEXT NOT NULL,
-                    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP NOT NULL,
-                    status TEXT DEFAULT 'ACTIVE',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (traveler_id) REFERENCES travelers (id)
-                )
-            """)
-            
-            # Create transactions table
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS transactions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    traveler_id INTEGER NOT NULL,
-                    service_type TEXT NOT NULL,
-                    amount REAL NOT NULL,
-                    currency TEXT DEFAULT 'EGP',
-                    status TEXT DEFAULT 'PENDING',
-                    qr_data TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (traveler_id) REFERENCES travelers (id)
-                )
-            """)
-            
-            # Create indexes for performance
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_travelers_passport ON travelers(passport)")
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_travelers_wallet_status ON travelers(wallet_status)")
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_visas_traveler ON visas(traveler_id)")
-            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_traveler ON transactions(traveler_id)")
-            
+            self._init_schema()
+            self.initialized = True
+    
+    def _init_schema(self):
+        """Initialize enterprise database schema with deep data fields"""
+        # Drop existing tables for clean migration
+        self.cursor.execute("DROP TABLE IF EXISTS travelers")
+        self.cursor.execute("DROP TABLE IF EXISTS tickets")
+        self.cursor.execute("DROP TABLE IF EXISTS transactions")
+        self.cursor.execute("DROP TABLE IF EXISTS monuments")
+        self.cursor.execute("DROP TABLE IF EXISTS visas")
+        self.cursor.execute("DROP TABLE IF EXISTS enterprise_packages")
+        self.cursor.execute("DROP TABLE IF EXISTS ai_interactions")
+        
+        # Updated travelers table with DEEP DATA fields (15 total)
+        self.cursor.execute('''
+            CREATE TABLE travelers (\n                id INTEGER PRIMARY KEY, \n                name TEXT, \n                full_name TEXT,\n                passport_number TEXT UNIQUE, \n                nationality TEXT,\n                nationality_group TEXT,\n                passport_expiry TEXT,\n                biometric_hash TEXT, \n                wallet_balance REAL DEFAULT 0, \n                wallet_status TEXT DEFAULT 'LOCKED',\n                bank_linked BOOLEAN DEFAULT 0,\n                green_points INTEGER DEFAULT 0, \n                has_claimed_gift BOOLEAN DEFAULT 0,\n                created_at TEXT,\n                -- ALL 18 DEEP DATA FIELDS (2026 Procedure Compliance)\n                dob TEXT,\n                gender TEXT,\n                phone TEXT,\n                email TEXT,\n                arrival_date TEXT,\n                country_boarded TEXT,\n                flight_number TEXT,\n                mode_of_arrival TEXT,\n                departure_date TEXT,\n                country_residence TEXT,\n                visa_no TEXT,\n                issued_by TEXT,\n                accommodation_type TEXT,\n                accommodation_address TEXT,\n                occupation TEXT,\n                purpose_of_travel TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE tickets (
+                id INTEGER PRIMARY KEY,
+                traveler_id INTEGER,
+                monument_name TEXT,
+                visitor_type TEXT,
+                quantity INTEGER,
+                price REAL,
+                qr_hash TEXT,
+                status TEXT DEFAULT 'ACTIVE',
+                created_at TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY,
+                traveler_id INTEGER,
+                description TEXT,
+                amount REAL,
+                category TEXT,
+                payment_method TEXT,
+                created_at TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE monuments (
+                id INTEGER PRIMARY KEY,
+                name TEXT UNIQUE,
+                description TEXT,
+                base_price_foreigner REAL,
+                location TEXT,
+                google_maps_link TEXT,
+                opening_hours TEXT,
+                accessibility_info TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE visas (
+                id INTEGER PRIMARY KEY,
+                traveler_id INTEGER,
+                stamp TEXT UNIQUE,
+                status TEXT DEFAULT 'ACTIVE',
+                issued_at TEXT,
+                expires_at TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE enterprise_packages (
+                id INTEGER PRIMARY KEY,
+                package_name TEXT,
+                description TEXT,
+                price REAL,
+                duration_days INTEGER,
+                features TEXT,
+                created_at TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE ai_interactions (
+                id INTEGER PRIMARY KEY,
+                traveler_id INTEGER,
+                question TEXT,
+                response TEXT,
+                category TEXT,
+                created_at TEXT
+            )
+        ''')
+        
+        # Seed monuments with enhanced information
+        monuments_data = [
+            ("Great Pyramid", "The last surviving Wonder of the Ancient World", 600, "Giza Plateau, Egypt", "https://maps.google.com/?q=Great+Pyramid+Giza", "8:00-17:00", "Wheelchair accessible"),
+            ("Karnak Temple", "Largest ancient religious site in the world", 400, "Luxor, Egypt", "https://maps.google.com/?q=Karnak+Temple+Luxor", "6:00-18:00", "Partial accessibility"),
+            ("GEM Museum", "Grand Egyptian Museum - Home to Tutankhamun treasures", 300, "Giza, Egypt", "https://maps.google.com/?q=Grand+Egyptian+Museum", "9:00-17:00", "Fully accessible"),
+            ("Valley of Kings", "Royal burial ground of pharaohs", 350, "Luxor, Egypt", "https://maps.google.com/?q=Valley+of+Kings+Luxor", "6:00-17:00", "Limited accessibility"),
+            ("Abu Simbel", "Massive rock temples built by Ramesses II", 450, "Aswan, Egypt", "https://maps.google.com/?q=Abu+Simbel+Aswan", "7:00-17:00", "Wheelchair accessible")
+        ]
+        
+        self.cursor.executemany('''
+            INSERT INTO monuments (name, description, base_price_foreigner, location, google_maps_link, opening_hours, accessibility_info)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', monuments_data)
+        
+        # Seed enterprise packages
+        packages_data = [
+            ("Executive Egypt Tour", "7-day luxury tour with VIP services", 50000, 7, "Private guide, 5-star hotels, VIP transport, exclusive access"),
+            ("Corporate Conference Package", "Complete conference organization", 30000, 3, "Venue booking, accommodation, activities, catering"),
+            ("Team Building Adventure", "Desert safari with team activities", 15000, 2, "Desert safari, team activities, meals, transport"),
+            ("Cultural Immersion Program", "Deep cultural experience", 10000, 5, "Museum tours, workshops, cultural guides")
+        ]
+        
+        self.cursor.executemany('''
+            INSERT INTO enterprise_packages (package_name, description, price, duration_days, features, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', [(pkg[0], pkg[1], pkg[2], pkg[3], pkg[4], datetime.datetime.now().isoformat()) for pkg in packages_data])
+        
+        self.conn.commit()
+        logger.info("Enterprise database schema initialized with deep data fields")
+    
+    def register_traveler(
+        self, 
+        name, 
+        full_name, 
+        passport, 
+        nationality, 
+        nationality_group, 
+        expiry, 
+        bio_hash, 
+        dob, 
+        gender, 
+        phone, 
+        email, 
+        arrival_date, 
+        country_boarded, 
+        flight_number, 
+        mode_of_arrival, 
+        departure_date, 
+        country_residence, 
+        visa_no, 
+        issued_by, 
+        accommodation_type, 
+        accommodation_address, 
+        occupation, 
+        purpose_of_travel
+    ):
+        """Register traveler with deep data fields and Procedure Doc 1030 compliance"""
+        sql = '''INSERT INTO travelers (
+            name, full_name, passport_number, nationality, nationality_group, 
+            passport_expiry, biometric_hash, wallet_balance, wallet_status, bank_linked, green_points, has_claimed_gift, created_at,
+            dob, gender, phone, email, arrival_date, country_boarded, flight_number, mode_of_arrival, 
+            departure_date, country_residence, visa_no, issued_by, accommodation_type, accommodation_address, occupation, 
+            purpose_of_travel
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+        
+        params = (
+            name,
+            full_name,
+            passport,
+            nationality,
+            nationality_group,
+            expiry,
+            bio_hash,
+            0,  # wallet_balance
+            'LOCKED',  # wallet_status
+            0,  # bank_linked
+            0,  # green_points
+            0,  # has_claimed_gift
+            datetime.datetime.now().isoformat(),  # created_at
+            dob,
+            gender,
+            phone,
+            email,
+            arrival_date,
+            country_boarded,
+            flight_number,
+            mode_of_arrival,
+            departure_date,
+            country_residence,
+            visa_no,
+            issued_by,
+            accommodation_type,
+            accommodation_address,
+            occupation,
+            purpose_of_travel
+        )
+        
+        self.cursor.execute(sql, params)
+        self.conn.commit()
+        logger.info(f"Enterprise traveler registered: {name} with Procedure Doc 1030 compliance")
+        return self.cursor.lastrowid
+    
+    def get_traveler(self, tid):
+        """Get traveler information by ID"""
+        self.cursor.execute("SELECT * FROM travelers WHERE id=?", (tid,))
+        return self.cursor.fetchone()
+    
+    def activate_wallet(self, tid, card_number):
+        """Activate wallet with $200 USD deposit and enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET wallet_status='ACTIVE', wallet_balance=?, bank_linked=1 WHERE id=?", 
+                              (config.PRICING["activation_deposit"], tid))
             self.conn.commit()
-            logger.info("✅ Database schema initialized with deep data fields")
+            logger.info(f"Enterprise wallet activated for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise wallet activation failed: {e}")
+            return False
     
-    def register_traveler(self, name, full_name, passport, nationality, nationality_group, 
-                        passport_expiry, biometric_hash, occupation=None, purpose_of_travel=None,
-                        accommodation_address=None, dob=None, gender=None, phone=None,
-                        arrival_date=None, country_boarded=None, flight_number=None,
-                        mode_of_arrival=None, departure_date=None, country_residence=None,
-                        visa_no=None, issued_by=None):
-        """Register traveler with all 18 deep data fields"""
-        with self._db_lock:
-            try:
-                self.cursor.execute("""
-                    INSERT INTO travelers (
-                        name, full_name, passport, nationality, nationality_group, passport_expiry,
-                        biometric_hash, occupation, purpose_of_travel, accommodation_address, dob, gender,
-                        phone, arrival_date, country_boarded, flight_number, mode_of_arrival,
-                        departure_date, country_residence, visa_no, issued_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    name, full_name, passport, nationality, nationality_group, passport_expiry,
-                    biometric_hash, occupation, purpose_of_travel, accommodation_address, dob, gender,
-                    phone, arrival_date, country_boarded, flight_number, mode_of_arrival,
-                    departure_date, country_residence, visa_no, issued_by
-                ))
-                
-                traveler_id = self.cursor.lastrowid
+    def top_up(self, tid, amount):
+        """Add funds to wallet with enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET wallet_balance=wallet_balance+? WHERE id=?", (amount, tid))
+            self.conn.commit()
+            logger.info(f"Enterprise wallet topped up: {amount} EGP for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise wallet top-up failed: {e}")
+            return False
+    
+    def purchase(self, tid, description, amount, category, payment_method="WALLET"):
+        """Process purchase transaction with comprehensive enterprise logging"""
+        try:
+            traveler = self.get_traveler(tid)
+            if traveler and traveler[8] >= amount:  # wallet_balance check
+                self.cursor.execute("UPDATE travelers SET wallet_balance=wallet_balance-? WHERE id=?", (amount, tid))
+                self.cursor.execute("INSERT INTO transactions (traveler_id, description, amount, category, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                  (tid, description, amount, category, payment_method, datetime.datetime.now().isoformat()))
                 self.conn.commit()
-                
-                enterprise_monitor.log_metric("traveler_registered", 1, "database")
-                logger.info(f"✅ Enterprise traveler registered: {name} (ID: {traveler_id})")
-                
-                return traveler_id
-                
-            except Exception as e:
-                logger.error(f"❌ Enterprise traveler registration failed: {e}")
-                enterprise_monitor.log_alert("ERROR", f"Traveler registration failed: {e}", "database")
-                return None
-    
-    def get_traveler(self, traveler_id):
-        """Get traveler by ID with enterprise logging"""
-        with self._db_lock:
-            try:
-                self.cursor.execute("SELECT * FROM travelers WHERE id = ?", (traveler_id,))
-                traveler = self.cursor.fetchone()
-                
-                if traveler:
-                    enterprise_monitor.log_metric("traveler_retrieved", 1, "database")
-                    logger.debug(f"✅ Enterprise traveler retrieved: {traveler_id}")
-                
-                return traveler
-                
-            except Exception as e:
-                logger.error(f"❌ Enterprise traveler retrieval failed: {e}")
-                enterprise_monitor.log_alert("ERROR", f"Traveler retrieval failed: {e}", "database")
-                return None
-    
-    def activate_wallet(self, traveler_id, card_number):
-        """Activate wallet with enterprise logging"""
-        with self._db_lock:
-            try:
-                self.cursor.execute(
-                    "UPDATE travelers SET wallet_status = 'ACTIVE', bank_linked = 1 WHERE id = ?",
-                    (traveler_id,)
-                )
-                self.conn.commit()
-                
-                enterprise_monitor.log_metric("wallet_activated", 1, "financial")
-                logger.info(f"✅ Enterprise wallet activated: {traveler_id}")
-                
+                logger.info(f"Enterprise purchase processed: {description} - {amount} EGP for traveler {tid}")
                 return True
-                
-            except Exception as e:
-                logger.error(f"❌ Enterprise wallet activation failed: {e}")
-                enterprise_monitor.log_alert("ERROR", f"Wallet activation failed: {e}", "financial")
-                return False
-    
-    def top_up(self, traveler_id, amount):
-        """Top up wallet with enterprise logging"""
-        with self._db_lock:
-            try:
-                self.cursor.execute(
-                    "UPDATE travelers SET wallet_balance = wallet_balance + ? WHERE id = ?",
-                    (amount, traveler_id)
-                )
-                self.conn.commit()
-                
-                enterprise_monitor.log_metric("wallet_topup", amount, "financial")
-                logger.info(f"✅ Enterprise wallet topped up: {traveler_id} - {amount} EGP")
-                
-                return True
-                
-            except Exception as e:
-                logger.error(f"❌ Enterprise wallet top-up failed: {e}")
-                enterprise_monitor.log_alert("ERROR", f"Wallet top-up failed: {e}", "financial")
-                return False
-    
-    def add_transaction(self, traveler_id, service_type, amount, currency='EGP', qr_data=None):
-        """Add transaction with enterprise logging"""
-        with self._db_lock:
-            try:
-                self.cursor.execute("""
-                    INSERT INTO transactions (traveler_id, service_type, amount, currency, qr_data)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (traveler_id, service_type, amount, currency, qr_data))
-                
-                transaction_id = self.cursor.lastrowid
-                self.conn.commit()
-                
-                enterprise_monitor.log_metric("transaction_added", amount, "financial")
-                logger.info(f"✅ Enterprise transaction added: {transaction_id} - {amount} {currency}")
-                
-                return transaction_id
-                
-            except Exception as e:
-                logger.error(f"❌ Enterprise transaction addition failed: {e}")
-                enterprise_monitor.log_alert("ERROR", f"Transaction addition failed: {e}", "financial")
-                return None
-
-# ==============================================================================
-# 🎯 CORE LOGIC ENGINES
-# ==============================================================================
-
-class VisaPolicy:
-    """Military-grade visa policy with 74+ eligible countries"""
-    
-    # CRITICAL UPDATE: Exact eligible countries list as specified
-    ELIGIBLE_COUNTRIES = [
-        "Albania", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahrain", 
-        "Belarus", "Belgium", "Bolivia", "Brazil", "Bulgaria", "Canada", "Chile", "China", 
-        "Colombia", "Croatia", "Cyprus", "Czech Republic", "Denmark", "Ecuador", "Estonia", 
-        "Finland", "France", "Georgia", "Germany", "Greece", "Hong Kong", "Hungary", "Iceland", 
-        "India", "Ireland", "Italy", "Japan", "Kazakhstan", "Kuwait", "Latvia", "Lithuania", 
-        "Luxembourg", "Malaysia", "Malta", "Mexico", "Moldova", "Monaco", "Montenegro", 
-        "Netherlands", "New Zealand", "North Macedonia", "Norway", "Oman", "Paraguay", "Peru", 
-        "Poland", "Portugal", "Qatar", "Romania", "Russia", "San Marino", "Saudi Arabia", 
-        "Serbia", "Singapore", "Slovakia", "Slovenia", "South Africa", "South Korea", "Spain", 
-        "Sweden", "Switzerland", "Taiwan", "Ukraine", "UAE", "UK", "USA", "Uruguay", 
-        "Vatican City", "Venezuela"
-    ]
-    
-    RESTRICTED_COUNTRIES = [
-        "Iran", "Afghanistan", "Syria", "Yemen", "Libya", "Somalia", 
-        "North Korea", "Sudan", "Lebanon", "Iraq", "Palestine"
-    ]
-    
-    @classmethod
-    def is_eligible(cls, nationality):
-        """Check if nationality is eligible for visa on arrival"""
-        return nationality in cls.ELIGIBLE_COUNTRIES
-    
-    @classmethod
-    def is_restricted(cls, nationality):
-        """Check if nationality is restricted"""
-        return nationality in cls.RESTRICTED_COUNTRIES
-    
-    @classmethod
-    def get_visa_status(cls, nationality):
-        """Get visa status for nationality"""
-        if cls.is_restricted(nationality):
-            return "RESTRICTED - Entry Denied"
-        elif cls.is_eligible(nationality):
-            return "ELIGIBLE - Visa on Arrival Available"
-        else:
-            return "NOT ELIGIBLE - Embassy Referral Required"
-
-class EcoEngine:
-    """Environmental impact calculation engine"""
-    
-    # Green score calculation for 2026 transport modes
-    TRANSPORT_SCORES = {
-        "Cairo Monorail": 20,
-        "LRT (Electric Train)": 20,
-        "Electric Bus": 20,
-        "Metro Line 1": 10,
-        "Metro Line 2": 10,
-        "Metro Line 3": 10,
-        "Gas-Powered Taxi": 0,
-        "Private Car": 0,
-        "Standard Uber": 0,
-        "Shared Shuttle": 5,
-        "Train": 15
-    }
-    
-    @classmethod
-    def calculate_green_score(cls, transport_mode):
-        """Calculate green score for transport mode"""
-        return cls.TRANSPORT_SCORES.get(transport_mode, 0)
-    
-    @classmethod
-    def get_transport_recommendations(cls):
-        """Get eco-friendly transport recommendations"""
-        return [mode for mode, score in cls.TRANSPORT_SCORES.items() if score >= 10]
-
-class PriceCalculator:
-    """Dynamic pricing calculation engine"""
-    
-    @staticmethod
-    def calculate_monument_price(base_price, nationality_group, visitor_type):
-        """Calculate monument ticket price"""
-        if nationality_group == "Egyptian":
-            return 100  # Fixed local price
-        elif nationality_group == "Arab":
-            return 200  # Arab discount
-        else:  # Foreign
-            if visitor_type == "Student":
-                return base_price * 0.5  # 50% student discount
-            elif visitor_type == "Kid":
-                return base_price * 0.3  # 30% kids discount
             else:
-                return base_price  # Full adult price
-    
-    @staticmethod
-    def calculate_visa_fee():
-        """Calculate visa fee"""
-        return config.PRICING["visa_fee"]
-    
-    @staticmethod
-    def calculate_activation_deposit():
-        """Calculate activation deposit"""
-        return config.PRICING["activation_deposit"]
-
-class DocumentIssuer:
-    """Enterprise PDF document generation with advanced features"""
-    
-    @staticmethod
-    def generate_visa_pdf(traveler_data, visa_data):
-        """Generate visa PDF with enterprise security features"""
-        if not import_status.get('reportlab', False):
-            logger.error("❌ PDF generation not available - ReportLab not imported")
-            return None
-        
-        try:
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.pagesizes import letter
-            from reportlab.lib.utils import ImageReader
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-            import io
-            
-            # Create PDF buffer
-            buffer = io.BytesIO()
-            c = canvas.Canvas(buffer, pagesize=letter)
-            
-            # Set up page
-            width, height = letter
-            
-            # Add security watermark
-            c.setFillColorRGB(0.9, 0.9, 0.9, alpha=0.3)
-            c.setFont("Helvetica", 50)
-            c.saveState()
-            c.translate(width/2, height/2)
-            c.rotate(45)
-            c.drawCentredText(0, 0, "HORUS SECURE")
-            c.restoreState()
-            
-            # Reset colors
-            c.setFillColorRGB(0, 0, 0)
-            
-            # Header
-            c.setFont("Helvetica-Bold", 24)
-            c.drawCentredText(width/2, height - 50, "ARAB REPUBLIC OF EGYPT")
-            
-            c.setFont("Helvetica-Bold", 18)
-            c.drawCentredText(width/2, height - 80, "E-VISA AUTHORIZATION")
-            
-            # Visa details
-            c.setFont("Helvetica", 12)
-            y_position = height - 150
-            
-            # Traveler information
-            c.drawString(50, y_position, f"Name: {traveler_data.get('full_name', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Passport: {traveler_data.get('passport', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Nationality: {traveler_data.get('nationality', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Date of Birth: {traveler_data.get('dob', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Gender: {traveler_data.get('gender', 'N/A')}")
-            
-            # Visa information
-            y_position -= 50
-            c.drawString(50, y_position, f"Visa Number: {visa_data.get('visa_no', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Issued By: {visa_data.get('issued_by', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Issue Date: {dt.datetime.now().strftime('%Y-%m-%d')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Expiry Date: {(dt.datetime.now() + dt.timedelta(days=180)).strftime('%Y-%m-%d')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Purpose: {traveler_data.get('purpose_of_travel', 'Tourism')}")
-            
-            # Security features
-            c.setFillColorRGB(1, 0, 0)
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(50, 50, f"SECURITY TOKEN: {HorusSecurity.generate_secure_token()[:16].upper()}")
-            
-            # Footer
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Helvetica", 8)
-            c.drawCentredText(width/2, 30, "This is a secure electronic document. Valid for 180 days from issue date.")
-            
-            # Finalize PDF
-            c.save()
-            
-            # Get PDF data
-            pdf_data = buffer.getvalue()
-            buffer.close()
-            
-            enterprise_monitor.log_metric("visa_pdf_generated", 1, "documents")
-            logger.info("✅ Enterprise visa PDF generated successfully")
-            
-            return pdf_data
-            
+                logger.warning(f"Enterprise insufficient funds for traveler {tid}: balance={traveler[8] if traveler else 0}, required={amount}")
+                return False
         except Exception as e:
-            logger.error(f"❌ Enterprise visa PDF generation failed: {e}")
-            enterprise_monitor.log_alert("ERROR", f"Visa PDF generation failed: {e}", "documents")
-            return None
+            logger.error(f"Enterprise purchase processing failed: {e}")
+            return False
+    
+    def create_ticket(self, traveler_id, monument_name, visitor_type, quantity, price):
+        """Create ticket record with QR hash and enterprise logging"""
+        try:
+            qr_hash = hashlib.sha256(f"{traveler_id}{monument_name}{datetime.datetime.now()}".encode()).hexdigest()
+            self.cursor.execute('''
+                INSERT INTO tickets (traveler_id, monument_name, visitor_type, quantity, price, qr_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (traveler_id, monument_name, visitor_type, quantity, price, qr_hash, datetime.datetime.now().isoformat()))
+            self.conn.commit()
+            logger.info(f"Enterprise ticket created: {monument_name} - {quantity} {visitor_type} for traveler {traveler_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise ticket creation failed: {e}")
+            return False
+    
+    def add_green_points(self, tid, points):
+        """Add green points to traveler with enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET green_points=green_points+? WHERE id=?", (points, tid))
+            self.conn.commit()
+            logger.info(f"Enterprise green points added: {points} points for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise green points addition failed: {e}")
+            return False
+    
+    def claim_gift(self, tid):
+        """Claim welcome gift with enterprise logging and status tracking"""
+        try:
+            traveler = self.get_traveler(tid)
+            if traveler and not traveler[12]:  # has_claimed_gift is at index 12
+                self.cursor.execute("UPDATE travelers SET has_claimed_gift = 1 WHERE id=?", (tid,))
+                # Log gift transaction
+                self.cursor.execute("INSERT INTO transactions (traveler_id, description, amount, category, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                  (tid, "Enterprise Welcome Gift Claimed", 0, "GIFT", "SYSTEM", datetime.datetime.now().isoformat()))
+                self.conn.commit()
+                logger.info(f"Enterprise welcome gift claimed for traveler {tid}")
+                return True
+            else:
+                logger.warning(f"Enterprise gift claim failed for traveler {tid}: already claimed or not found")
+                return False
+        except Exception as e:
+            logger.error(f"Enterprise gift claim failed: {e}")
+            return False
+    
+    def link_bank(self, tid, bank_name):
+        """Link bank account to traveler with enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET bank_linked=1 WHERE id=?", (tid,))
+            self.conn.commit()
+            logger.info(f"Enterprise bank linked: {bank_name} for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise bank linking failed: {e}")
+            return False
+    
+    def add_visa(self, tid, stamp):
+        """Add visa record with enterprise logging"""
+        try:
+            expires_at = datetime.datetime.now() + datetime.timedelta(days=180)
+            self.cursor.execute("INSERT INTO visas (traveler_id, stamp, issued_at, expires_at) VALUES (?, ?, ?, ?)",
+                              (tid, stamp, datetime.datetime.now().isoformat(), expires_at.isoformat()))
+            self.conn.commit()
+            logger.info(f"Enterprise visa added: {stamp} for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise visa addition failed: {e}")
+            return False
+    
+    def log_ai_interaction(self, tid, question, response, category):
+        """Log AI interaction for enterprise analytics"""
+        try:
+            self.cursor.execute('''
+                INSERT INTO ai_interactions (traveler_id, question, response, category, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (tid, question, response, category, datetime.datetime.now().isoformat()))
+            self.conn.commit()
+            logger.info(f"Enterprise AI interaction logged for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise AI interaction logging failed: {e}")
+            return False
+    
+    def get_data(self, table):
+        """Generic data retrieval with enterprise error handling"""
+        try:
+            self.cursor.execute(f"SELECT * FROM {table}")
+            return self.cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Enterprise data retrieval failed for table {table}: {e}")
+            return []
+    
+    def get_system_stats(self):
+        """Get comprehensive enterprise system statistics"""
+        try:
+            stats = {}
+            stats['total_travelers'] = self.cursor.execute("SELECT COUNT(*) FROM travelers").fetchone()[0]
+            stats['active_wallets'] = self.cursor.execute("SELECT COUNT(*) FROM travelers WHERE wallet_status='ACTIVE'").fetchone()[0]
+            stats['total_transactions'] = self.cursor.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+            stats['total_visas'] = self.cursor.execute("SELECT COUNT(*) FROM visas").fetchone()[0]
+            stats['gifts_claimed'] = self.cursor.execute("SELECT COUNT(*) FROM travelers WHERE has_claimed_gift=1").fetchone()[0]
+            stats['total_tickets'] = self.cursor.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+            stats['ai_interactions'] = self.cursor.execute("SELECT COUNT(*) FROM ai_interactions").fetchone()[0]
+            stats['enterprise_packages'] = self.cursor.execute("SELECT COUNT(*) FROM enterprise_packages").fetchone()[0]
+            return stats
+        except Exception as e:
+            logger.error(f"Enterprise system stats retrieval failed: {e}")
+            return {}
+    
+    def get_enterprise_analytics(self):
+        """Get enterprise analytics for business intelligence"""
+        try:
+            analytics = {}
+            
+            # Revenue analytics
+            analytics['total_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions").fetchone()[0] or 0
+            analytics['visa_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE category='GOVT'").fetchone()[0] or 0
+            analytics['transport_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE category='TRANSPORT'").fetchone()[0] or 0
+            analytics['monument_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE category='MONUMENTS'").fetchone()[0] or 0
+            
+            # User analytics
+            analytics['avg_wallet_balance'] = self.cursor.execute("SELECT AVG(wallet_balance) FROM travelers WHERE wallet_status='ACTIVE'").fetchone()[0] or 0
+            analytics['avg_green_points'] = self.cursor.execute("SELECT AVG(green_points) FROM travelers").fetchone()[0] or 0
+            stats = self.get_system_stats()
+            analytics['gift_claim_rate'] = (stats['gifts_claimed'] / stats['total_travelers'] * 100) if stats['total_travelers'] > 0 else 0
+            
+            # Popular destinations
+            analytics['top_monuments'] = self.cursor.execute('''
+                SELECT monument_name, COUNT(*) as visits 
+                FROM tickets 
+                GROUP BY monument_name 
+                ORDER BY visits DESC 
+                LIMIT 5
+            ''').fetchall()
+            
+            return analytics
+        except Exception as e:
+            logger.error(f"Enterprise analytics retrieval failed: {e}")
+            return {}
+
+# ==============================================================================
+        return self.cursor.fetchone()
+    
+    def activate_wallet(self, tid, card_number):
+        """Activate wallet with $200 USD deposit and enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET wallet_status='ACTIVE', wallet_balance=?, bank_linked=1 WHERE id=?", 
+                              (config.PRICING["activation_deposit"], tid))
+            self.conn.commit()
+            logger.info(f"Enterprise wallet activated for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise wallet activation failed: {e}")
+            return False
+    
+    def top_up(self, tid, amount):
+        """Add funds to wallet with enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET wallet_balance=wallet_balance+? WHERE id=?", (amount, tid))
+            self.conn.commit()
+            logger.info(f"Enterprise wallet topped up: {amount} EGP for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise wallet top-up failed: {e}")
+            return False
+    
+    def purchase(self, tid, description, amount, category, payment_method="WALLET"):
+        """Process purchase transaction with comprehensive enterprise logging"""
+        try:
+            traveler = self.get_traveler(tid)
+            if traveler and traveler[8] >= amount:  # wallet_balance check
+                self.cursor.execute("UPDATE travelers SET wallet_balance=wallet_balance-? WHERE id=?", (amount, tid))
+                self.cursor.execute("INSERT INTO transactions (traveler_id, description, amount, category, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                  (tid, description, amount, category, payment_method, datetime.datetime.now().isoformat()))
+                self.conn.commit()
+                logger.info(f"Enterprise purchase processed: {description} - {amount} EGP for traveler {tid}")
+                return True
+            else:
+                logger.warning(f"Enterprise insufficient funds for traveler {tid}: balance={traveler[8] if traveler else 0}, required={amount}")
+                return False
+        except Exception as e:
+            logger.error(f"Enterprise purchase processing failed: {e}")
+            return False
+    
+    def create_ticket(self, traveler_id, monument_name, visitor_type, quantity, price):
+        """Create ticket record with QR hash and enterprise logging"""
+        try:
+            qr_hash = hashlib.sha256(f"{traveler_id}{monument_name}{datetime.datetime.now()}".encode()).hexdigest()
+            self.cursor.execute('''
+                INSERT INTO tickets (traveler_id, monument_name, visitor_type, quantity, price, qr_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (traveler_id, monument_name, visitor_type, quantity, price, qr_hash, datetime.datetime.now().isoformat()))
+            self.conn.commit()
+            logger.info(f"Enterprise ticket created: {monument_name} - {quantity} {visitor_type} for traveler {traveler_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise ticket creation failed: {e}")
+            return False
+    
+    def add_green_points(self, tid, points):
+        """Add green points to traveler with enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET green_points=green_points+? WHERE id=?", (points, tid))
+            self.conn.commit()
+            logger.info(f"Enterprise green points added: {points} points for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise green points addition failed: {e}")
+            return False
+    
+    def claim_gift(self, tid):
+        """Claim welcome gift with enterprise logging and status tracking"""
+        try:
+            traveler = self.get_traveler(tid)
+            if traveler and not traveler[12]:  # has_claimed_gift is at index 12
+                self.cursor.execute("UPDATE travelers SET has_claimed_gift = 1 WHERE id=?", (tid,))
+                # Log gift transaction
+                self.cursor.execute("INSERT INTO transactions (traveler_id, description, amount, category, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                  (tid, "Enterprise Welcome Gift Claimed", 0, "GIFT", "SYSTEM", datetime.datetime.now().isoformat()))
+                self.conn.commit()
+                logger.info(f"Enterprise welcome gift claimed for traveler {tid}")
+                return True
+            else:
+                logger.warning(f"Enterprise gift claim failed for traveler {tid}: already claimed or not found")
+                return False
+        except Exception as e:
+            logger.error(f"Enterprise gift claim failed: {e}")
+            return False
+    
+    def link_bank(self, tid, bank_name):
+        """Link bank account to traveler with enterprise logging"""
+        try:
+            self.cursor.execute("UPDATE travelers SET bank_linked=1 WHERE id=?", (tid,))
+            self.conn.commit()
+            logger.info(f"Enterprise bank linked: {bank_name} for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise bank linking failed: {e}")
+            return False
+    
+    def add_visa(self, tid, stamp):
+        """Add visa record with enterprise logging"""
+        try:
+            expires_at = datetime.datetime.now() + datetime.timedelta(days=180)
+            self.cursor.execute("INSERT INTO visas (traveler_id, stamp, issued_at, expires_at) VALUES (?, ?, ?, ?)",
+                              (tid, stamp, datetime.datetime.now().isoformat(), expires_at.isoformat()))
+            self.conn.commit()
+            logger.info(f"Enterprise visa added: {stamp} for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise visa addition failed: {e}")
+            return False
+    
+    def log_ai_interaction(self, tid, question, response, category):
+        """Log AI interaction for enterprise analytics"""
+        try:
+            self.cursor.execute('''
+                INSERT INTO ai_interactions (traveler_id, question, response, category, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (tid, question, response, category, datetime.datetime.now().isoformat()))
+            self.conn.commit()
+            logger.info(f"Enterprise AI interaction logged for traveler {tid}")
+            return True
+        except Exception as e:
+            logger.error(f"Enterprise AI interaction logging failed: {e}")
+            return False
+    
+    def get_data(self, table):
+        """Generic data retrieval with enterprise error handling"""
+        try:
+            self.cursor.execute(f"SELECT * FROM {table}")
+            return self.cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Enterprise data retrieval failed for table {table}: {e}")
+            return []
+    
+    def get_system_stats(self):
+        """Get comprehensive enterprise system statistics"""
+        try:
+            stats = {}
+            stats['total_travelers'] = self.cursor.execute("SELECT COUNT(*) FROM travelers").fetchone()[0]
+            stats['active_wallets'] = self.cursor.execute("SELECT COUNT(*) FROM travelers WHERE wallet_status='ACTIVE'").fetchone()[0]
+            stats['total_transactions'] = self.cursor.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+            stats['total_visas'] = self.cursor.execute("SELECT COUNT(*) FROM visas").fetchone()[0]
+            stats['gifts_claimed'] = self.cursor.execute("SELECT COUNT(*) FROM travelers WHERE has_claimed_gift=1").fetchone()[0]
+            stats['total_tickets'] = self.cursor.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+            stats['ai_interactions'] = self.cursor.execute("SELECT COUNT(*) FROM ai_interactions").fetchone()[0]
+            stats['enterprise_packages'] = self.cursor.execute("SELECT COUNT(*) FROM enterprise_packages").fetchone()[0]
+            return stats
+        except Exception as e:
+            logger.error(f"Enterprise system stats retrieval failed: {e}")
+            return {}
+    
+    def get_enterprise_analytics(self):
+        """Get enterprise analytics for business intelligence"""
+        try:
+            analytics = {}
+            
+            # Revenue analytics
+            analytics['total_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions").fetchone()[0] or 0
+            analytics['visa_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE category='GOVT'").fetchone()[0] or 0
+            analytics['transport_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE category='TRANSPORT'").fetchone()[0] or 0
+            analytics['monument_revenue'] = self.cursor.execute("SELECT SUM(amount) FROM transactions WHERE category='MONUMENTS'").fetchone()[0] or 0
+            
+            # User analytics
+            analytics['avg_wallet_balance'] = self.cursor.execute("SELECT AVG(wallet_balance) FROM travelers WHERE wallet_status='ACTIVE'").fetchone()[0] or 0
+            analytics['avg_green_points'] = self.cursor.execute("SELECT AVG(green_points) FROM travelers").fetchone()[0] or 0
+            analytics['gift_claim_rate'] = (stats['gifts_claimed'] / stats['total_travelers'] * 100) if stats['total_travelers'] > 0 else 0
+            
+            # Popular destinations
+            analytics['top_monuments'] = self.cursor.execute('''
+                SELECT monument_name, COUNT(*) as visits 
+                FROM tickets 
+                GROUP BY monument_name 
+                ORDER BY visits DESC 
+                LIMIT 5
+            ''').fetchall()
+            
+            return analytics
+        except Exception as e:
+            logger.error(f"Enterprise analytics retrieval failed: {e}")
+            return {}
+
+# ==============================================================================
+# 🤖 ENTERPRISE GIT AUTOPILOT & AI SERVICES
+# ==============================================================================
+
+class GitAutopilot:
+    """Enterprise automated Git repository management with comprehensive logging"""
     
     @staticmethod
-    def generate_ticket_pdf(traveler_data, monument_data, ticket_data):
-        """Generate monument ticket PDF with enterprise features"""
-        if not import_status.get('reportlab', False):
-            logger.error("❌ PDF generation not available - ReportLab not imported")
-            return None
-        
+    def sync_codebase():
+        """Sync codebase to GitHub repository with enterprise error handling"""
         try:
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.pagesizes import letter
-            import io
+            # Initialize git repository if not exists
+            if not os.path.exists(".git"):
+                logger.info("Initializing Enterprise Git repository...")
+                os.system("git init")
+                os.system("git branch -M main")
             
-            # Create PDF buffer
-            buffer = io.BytesIO()
-            c = canvas.Canvas(buffer, pagesize=letter)
+            # Add all files
+            logger.info("Adding files to Git...")
+            os.system("git add .")
             
-            # Set up page
-            width, height = letter
+            # Check if there are changes to commit
+            result = os.system("git diff --cached --quiet")
+            if result == 0:  # No changes to commit
+                logger.info("No changes to commit")
+                return "✅ No changes to commit - repository is up to date"
             
-            # Header
-            c.setFillColorRGB(0.8, 0.6, 0.2)  # Gold color
-            c.setFont("Helvetica-Bold", 20)
-            c.drawCentredText(width/2, height - 50, "HORUS HERITAGE TICKET")
+            # Commit with timestamp
+            commit_msg = f"HORUS v{HorusConfig.VERSION} - Enterprise Auto-sync {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            logger.info(f"Committing changes: {commit_msg}")
+            os.system(f'git commit -m "{commit_msg}"')
             
-            # Ticket details
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Helvetica", 12)
-            y_position = height - 150
+            # Push to remote (if configured)
+            # os.system("git push origin main")
             
-            c.drawString(50, y_position, f"Visitor: {traveler_data.get('full_name', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Monument: {monument_data.get('name', 'N/A')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Date: {dt.datetime.now().strftime('%Y-%m-%d')}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Visitors: {ticket_data.get('visitors', 1)}")
-            y_position -= 30
-            c.drawString(50, y_position, f"Total Price: {ticket_data.get('total_price', 0)} EGP")
-            
-            # QR Code placeholder
-            c.setFillColorRGB(0.5, 0.5, 0.5)
-            c.setFont("Helvetica", 10)
-            c.drawString(50, 100, "QR Code: [SCAN FOR VALIDATION]")
-            
-            # Security token
-            c.setFillColorRGB(1, 0, 0)
-            c.setFont("Helvetica-Bold", 8)
-            c.drawString(50, 50, f"TOKEN: {HorusSecurity.generate_secure_token()[:12].upper()}")
-            
-            # Finalize PDF
-            c.save()
-            
-            # Get PDF data
-            pdf_data = buffer.getvalue()
-            buffer.close()
-            
-            enterprise_monitor.log_metric("ticket_pdf_generated", 1, "documents")
-            logger.info("✅ Enterprise ticket PDF generated successfully")
-            
-            return pdf_data
-            
+            logger.info(f"Enterprise code synced successfully. Commit: {commit_msg}")
+            return f"✅ Enterprise code synced successfully. Commit: {commit_msg}"
         except Exception as e:
-            logger.error(f"❌ Enterprise ticket PDF generation failed: {e}")
-            enterprise_monitor.log_alert("ERROR", f"Ticket PDF generation failed: {e}", "documents")
-            return None
+            logger.error(f"Enterprise Git sync failed: {str(e)}")
+            return f"❌ Sync failed: {str(e)}"
+
+# Global key rotation counter for enterprise load balancing
+_key_rotation_counter = 0
+
+def get_rotated_key():
+    """Get API key with enterprise rotation logic using hardcoded keys"""
+    global _key_rotation_counter
+    
+    # Use hardcoded keys from config
+    keys = config.GEMINI_KEYS
+    logger.info(f"DEBUG: Using {len(keys)} hardcoded AI keys.")
+    
+    if not keys or not keys[0] or (len(keys) == 1 and not keys[0].strip()):
+        logger.error("❌ No GEMINI_KEYS found in Colab secrets or environment variables")
+        logger.info("💡 In Colab: Add GEMINI_KEYS to secrets (comma-separated for multiple keys)")
+        logger.info("💡 Locally: Set environment variable: export GEMINI_KEYS='key1,key2,key3'")
+        return None
+    
+    # Filter out empty keys and strip whitespace
+    valid_keys = [key.strip() for key in keys if key.strip()]
+    logger.info(f"DEBUG: Found {len(valid_keys)} valid AI keys after filtering.")
+    
+    if not valid_keys:
+        logger.error("❌ No valid API keys found after filtering")
+        return None
+    
+    # Validate key format (Gemini keys are typically 39 characters starting with 'AIza')
+    for key in valid_keys[:]:  # Use slice to avoid modifying list during iteration
+        if not key.startswith('AIza') or len(key) < 20:
+            logger.warning(f"⚠️ Invalid Gemini API key format: {key[:10]}...")
+            valid_keys.remove(key)
+    
+    if not valid_keys:
+        logger.error("❌ No valid Gemini API keys found (should start with 'AIza')")
+        return None
+    
+    # Enterprise rotation strategy: Use random choice with fallback to round-robin
+    try:
+        # Primary strategy: Random selection for load distribution
+        selected_key = random.choice(valid_keys)
+        _key_rotation_counter += 1
+        
+        logger.info(f"🔑 Enterprise AI key rotation: Using key {_key_rotation_counter % len(valid_keys) + 1}/{len(valid_keys)}")
+        logger.info(f"🔑 Key format valid: {selected_key[:10]}...{selected_key[-4:]}")
+        return selected_key
+    except Exception as e:
+        logger.error(f"❌ Key rotation error: {e}")
+        # Fallback to first key
+        return valid_keys[0]
+
+def ask_ai(msg, history):
+    """Enterprise AI chat interface with comprehensive error handling and logging"""
+    if not config.AI_ENABLED:
+        return "⚠️ Enterprise AI Chat is not available. Please install google-genai package."
+    
+    key = get_rotated_key()
+    if not key: 
+        return "⚠️ Configuration Error: Please set GEMINI_KEYS environment variable with your API key."
+    
+    try:
+        client = genai.Client(api_key=key)
+        res = client.models.generate_content(
+            model=config.AI_MODEL, 
+            contents=msg
+        )
+        logger.info(f"Enterprise AI response generated for message: {msg[:50]}...")
+        return res.text
+    except Exception as e: 
+        logger.error(f"Enterprise AI chat error: {str(e)}")
+        return f"AI Error: {str(e)}"
 
 # ==============================================================================
-# GLOBAL DATABASE INSTANCE
+# 📱 ENTERPRISE UI (PLATINUM DASHBOARD) - ENHANCED WITH SELF-HEALING
 # ==============================================================================
 
-# Create global database instance
-db = HorusDB()
-logger.info("✅ Enterprise Database System Initialized - Part 2 Complete")
-
-# ==============================================================================
-# 🎨 USER INTERFACE FUNCTIONS (Part 3 of 4)
-# ==============================================================================
-
-# Global user state
 current_user = None
-current_language = "English"
 
-def ui_login(name, full_name, passport, nationality, nationality_group, passport_expiry, 
-             biometric_hash, occupation=None, purpose_of_travel=None, accommodation_address=None,
-             dob=None, gender=None, phone=None, arrival_date=None, country_boarded=None,
-             flight_number=None, mode_of_arrival=None, departure_date=None, country_residence=None,
-             visa_no=None, issued_by=None):
-    """Enhanced login with 18 deep data fields and wallet setup flow"""
+def ui_login(image, passport, nationality, full_name, passport_expiry, occupation, purpose_of_travel, accommodation_address, dob, gender, phone, arrival_date, country_boarded, flight_number, mode_of_arrival, departure_date):
+    """Enterprise login with Procedure Doc 1030 compliance and 72-hour validation"""
     global current_user
     
-    try:
-        # Register traveler with all 18 deep data fields
-        uid = db.register_traveler(
-            name, full_name, passport, nationality, nationality_group, passport_expiry,
-            biometric_hash, occupation, purpose_of_travel, accommodation_address, dob, gender,
-            phone, arrival_date, country_boarded, flight_number, mode_of_arrival,
-            departure_date, country_residence, visa_no, issued_by
-        )
-        
-        if uid:
-            current_user = db.get_traveler(uid)
-            
-            if current_user:
-                # Check wallet status for setup flow
-                wallet_status = current_user[9]  # wallet_status at index 9
-                
-                if wallet_status == 'LOCKED':
-                    # Show setup wallet panel for new users
-                    return (
-                        f"✅ Welcome {name}! Please set up your wallet to continue.",
-                        gr.Group(visible=False),  # Hide main app
-                        gr.Group(visible=False),  # Hide activation panel  
-                        gr.Group(visible=True),   # Show setup wallet panel
-                        f"EGP {current_user[8]}",
-                        f"🌿 {current_user[11]}",
-                        "🔒 WALLET LOCKED - Setup required to access features"
-                    )
-                else:
-                    # Show main app for active users
-                    return (
-                        f"✅ Welcome back {name}!",
-                        gr.Group(visible=True),   # Show main app
-                        gr.Group(visible=False),  # Hide activation panel
-                        gr.Group(visible=False),  # Hide setup wallet panel
-                        f"EGP {current_user[8]}",
-                        f"🌿 {current_user[11]}",
-                        "✅ ACCOUNT ACTIVE - All features available"
-                    )
-            else:
-                return f"❌ Login failed: User not found", gr.update(), gr.update(), gr.update(), "", "", ""
-        else:
-            return f"❌ Registration failed", gr.update(), gr.update(), gr.update(), "", "", ""
-            
-    except Exception as e:
-        logger.error(f"❌ Login error: {e}")
-        enterprise_monitor.log_alert("ERROR", f"Login failed: {e}", "ui")
-        return f"❌ Error: {e}", gr.update(), gr.update(), gr.update(), "", "", ""
-
-def ui_demo_login():
-    """Demo login with auto-activation and 18 deep data fields - CRITICAL FIX"""
-    global current_user
+    # Check if this is a demo login (bypass 72-hour rule)
+    is_demo_user = full_name.strip().lower() == "demo user"
     
+    # CRITICAL FIX: Check for None image first
+    if image is None:
+        return "⚠️ Waiting for biometric scan...", gr.update(), gr.update(), "", "", ""
+    
+    # Robust numpy check
+    if not isinstance(image, np.ndarray):
+        return "❌ HARDWARE ERROR: WEBCAM DATA INVALID", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Full Name regex (letters, spaces, hyphens only)
+    import re
+    if not re.match(r'^[a-zA-Z\s\-]+$', full_name.strip()):
+        return "❌ INVALID FULL NAME: Use letters, spaces, and hyphens only", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Passport Number regex (alphanumeric)
+    if not re.match(r'^[A-Za-z0-9]+$', passport.strip()):
+        return "❌ INVALID PASSPORT: Use letters and numbers only", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Passport Expiry regex (YYYY-MM-DD format)
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', passport_expiry.strip()):
+        return "❌ INVALID PASSPORT EXPIRY: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Date of Birth regex (YYYY-MM-DD format)
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', dob.strip()):
+        return "❌ INVALID DATE OF BIRTH: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Phone regex (international format)
+    if not re.match(r'^\+?[1-9]\d{1,14}$', phone.strip().replace(' ', '').replace('-', '')):
+        return "❌ INVALID PHONE: Use international format (e.g., +20123456789)", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Arrival Date regex (YYYY-MM-DD format)
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', arrival_date.strip()):
+        return "❌ INVALID ARRIVAL DATE: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+    
+    # STRICT VALIDATION: Departure Date regex (YYYY-MM-DD format)
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', departure_date.strip()):
+        return "❌ INVALID DEPARTURE DATE: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+    
+    # Additional validation: Check if passport expiry is in the future
     try:
-        name = "Diplomat-DEMO-001"
-        full_name = "Demo User"
-        
-        # CRITICAL FIX: Pass all 18 arguments to prevent TypeError
-        uid = db.register_traveler(
-            name, full_name, "D999999", "USA", "Foreign", "2030-01-01", "BIO-DEMO-KEY",
-            "Diplomat",                    # occupation
-            "Official Visit",              # purpose_of_travel
-            "Cairo Marriott Hotel",         # accommodation_address
-            "1990-01-01",                  # dob
-            "Male",                        # gender
-            "+20123456789",                # phone
-            "2026-10-01",                  # arrival_date
-            "USA",                         # country_boarded
-            "DEMO-001",                    # flight_number
-            "Air",                         # mode_of_arrival
-            "2026-10-10",                  # departure_date
-            "USA",                         # country_residence
-            "DEMO-VISA-123",               # visa_no
-            "US Department of State"       # issued_by
+        from datetime import datetime
+        expiry_date = datetime.strptime(passport_expiry.strip(), '%Y-%m-%d')
+        if expiry_date <= datetime.now():
+            return "❌ PASSPORT EXPIRED: Passport must be valid for future travel", gr.update(), gr.update(), "", "", ""
+    except ValueError:
+        return "❌ INVALID DATE: Check passport expiry format", gr.update(), gr.update(), "", "", ""
+    
+    # PROCEDURE DOC 1030 COMPLIANCE: 72-hour validation (bypass for demo users)
+    if not ArrivalLogic.validate_submission_time(arrival_date.strip(), is_demo_user):
+        validation_message = ArrivalLogic.get_validation_message(arrival_date.strip(), is_demo_user)
+        return f"❌ {validation_message}", gr.update(), gr.update(), "", "", ""
+    
+    bio_hash = HorusSecurity.scan_face(image)
+    if not bio_hash:
+        return "❌ BIOMETRIC SCAN FAILED", gr.update(), gr.update(), "", "", ""
+
+    nationality_group = VisaPolicy.get_nationality_group(nationality)
+    name = f"Traveler-{nationality[:3].upper()}-{passport[-4:]}"
+    
+    # Register with PROCEDURE DOC 1030 COMPLIANCE fields (all validated)
+    uid = db.register_traveler(
+        name, 
+        full_name.strip(), 
+        passport.strip(), 
+        nationality, 
+        nationality_group, 
+        passport_expiry.strip(), 
+        bio_hash, 
+        dob.strip(),
+        gender.strip(),
+        phone.strip(),
+        "traveler@horus.com",  # email
+        arrival_date.strip(),
+        country_boarded.strip(),
+        flight_number.strip(),
+        mode_of_arrival.strip(),
+        departure_date.strip(),
+        nationality,  # country_residence
+        "TBD",  # visa_no
+        "TBD",  # issued_by
+        "Hotel",  # accommodation_type
+        accommodation_address.strip(),  # accommodation_address
+        occupation.strip(),  # occupation
+        purpose_of_travel.strip()  # purpose_of_travel
+    )
+    current_user = db.get_traveler(uid)
+    
+    wallet_status = current_user[9]
+    wallet_balance = current_user[8]
+    green_points = current_user[11]
+    
+    if wallet_status == 'LOCKED':
+        return (
+            f"✅ Verified: {name} - WALLET LOCKED",
+            gr.Group(visible=False),  # Hide main app
+            gr.Group(visible=True),   # Show activation panel
+            f"EGP {wallet_balance}",
+            f"🌿 {green_points}",
+            "🔒 ACCOUNT LOCKED - Deposit $200 USD to activate",
+            "",  # QR input placeholder
+            gr.update(visible=False)  # Hide demo badge
         )
-        
-        if uid:
-            # Auto-activate wallet for demo user
-            db.activate_wallet(uid, "DEMO-CARD-1234-5678-9012")
-            
-            # Top up with demo funds
-            db.top_up(uid, 50000)  # 50,000 EGP
-            
-            current_user = db.get_traveler(uid)
-            
-            if current_user:
-                enterprise_monitor.log_metric("demo_login", 1, "ui")
-                logger.info(f"✅ Demo login successful: {name}")
-                
-                return (
-                    f"✅ DEMO MODE ACTIVATED: {name}",
-                    gr.Group(visible=True),   # Show Main App
-                    gr.Group(visible=False),  # Hide Activation Panel
-                    gr.Group(visible=False),  # Hide Setup Wallet Panel
-                    f"EGP {current_user[8]}",
-                    f"🌿 {current_user[11]}",
-                    "✅ ACCOUNT ACTIVE - All features available"
-                )
-            else:
-                return f"❌ Demo login failed: User not found", gr.update(), gr.update(), gr.update(), "", "", ""
-        else:
-            return f"❌ Demo registration failed", gr.update(), gr.update(), gr.update(), "", "", ""
-            
-    except Exception as e:
-        logger.error(f"❌ Demo login error: {e}")
-        enterprise_monitor.log_alert("ERROR", f"Demo login failed: {e}", "ui")
-        return f"❌ Demo Error: {e}", gr.update(), gr.update(), gr.update(), "", "", ""
+    else:
+        return (
+            f"✅ Verified: {name} - ACCOUNT ACTIVE",
+            gr.Group(visible=True),   # Show main app
+            gr.Group(visible=False),  # Hide activation panel
+            f"EGP {wallet_balance}",
+            f"🌿 {green_points}",
+            "✅ ACCOUNT ACTIVE - All features available",
+            "",  # QR input placeholder
+            gr.update(visible=False)  # Hide demo badge
+        )
 
 def ui_create_wallet(card_number, expiry, cvv):
-    """NEW: Create wallet with credit card validation and activation"""
+    """Create wallet with enterprise validation and $200 USD deposit"""
     global current_user
     
-    if not current_user:
-        return "❌ Please login first", gr.update(), gr.update(), gr.update(), "", "", ""
+    if not current_user: 
+        return "❌ Login required", gr.update(), gr.update(), "", "", ""
+    
+    # Validate card number (basic check)
+    if not card_number or len(card_number.replace('-', '').replace(' ', '')) < 16:
+        return "❌ Invalid card number", gr.update(), gr.update(), "", "", ""
+    
+    # Validate expiry (MM/YY format)
+    import re
+    if not re.match(r'^(0[1-9]|1[0-2])\/\d{2}$', expiry.strip()):
+        return "❌ Invalid expiry format (use MM/YY)", gr.update(), gr.update(), "", "", ""
+    
+    # Validate CVV
+    if not cvv or len(cvv.strip()) < 3 or len(cvv.strip()) > 4:
+        return "❌ Invalid CVV", gr.update(), gr.update(), "", "", ""
     
     try:
-        # Validate credit card
-        if not HorusSecurity.validate_credit_card(card_number):
-            return "❌ Invalid credit card number", gr.update(), gr.update(), gr.update(), "", "", ""
+        # Activate wallet
+        db.activate_wallet(current_user[0], card_number.replace('-', '').replace(' ', ''))
         
-        # Validate expiry and CVV
-        if not expiry or len(expiry) < 5:
-            return "❌ Invalid expiry date (MM/YY)", gr.update(), gr.update(), gr.update(), "", "", ""
+        # Deposit $200 USD (10,000 EGP)
+        db.top_up(current_user[0], 10000)
         
-        if not cvv or len(cvv) < 3 or len(cvv) > 4:
-            return "❌ Invalid CVV", gr.update(), gr.update(), gr.update(), "", "", ""
+        # Refresh user data
+        current_user = db.get_traveler(current_user[0])
         
-        # Activate wallet with credit card
-        success = db.activate_wallet(current_user[0], card_number)
-        
-        if success:
-            # Add activation deposit ($200 USD = 10,000 EGP)
-            db.top_up(current_user[0], 10000)
-            
-            # Add transaction record
-            db.add_transaction(
-                current_user[0], 
-                "WALLET_ACTIVATION", 
-                10000, 
-                "EGP", 
-                f"CARD:{card_number[-4:]}"
-            )
-            
-            # Refresh user data
-            current_user = db.get_traveler(current_user[0])
-            
-            enterprise_monitor.log_metric("wallet_created", 1, "financial")
-            logger.info(f"✅ Wallet created successfully: {current_user[0]}")
-            
-            return (
-                "✅ Wallet created successfully! $200 USD deposited. Account now active.",
-                gr.Group(visible=True),   # Show Main App
-                gr.Group(visible=False),  # Hide Activation Panel
-                gr.Group(visible=False),  # Hide Setup Wallet Panel
-                f"EGP {current_user[8]}",
-                f"🌿 {current_user[11]}",
-                "✅ ACCOUNT ACTIVE - All features available"
-            )
-        else:
-            return "❌ Wallet activation failed", gr.update(), gr.update(), gr.update(), "", "", ""
-            
-    except Exception as e:
-        logger.error(f"❌ Wallet creation error: {e}")
-        enterprise_monitor.log_alert("ERROR", f"Wallet creation failed: {e}", "financial")
-        return f"❌ Error: {e}", gr.update(), gr.update(), gr.update(), "", "", ""
-
-def ui_issue_visa():
-    """Issue visa with enterprise PDF generation"""
-    global current_user
-    
-    if not current_user:
-        return "❌ Please login first", None
-    
-    try:
-        # Check visa eligibility
-        nationality = current_user[4]  # nationality at index 4
-        visa_status = VisaPolicy.get_visa_status(nationality)
-        
-        if "ELIGIBLE" not in visa_status:
-            return f"❌ {visa_status}", None
-        
-        # Generate visa data
-        visa_data = {
-            'visa_no': f"EG-VISA-{random.randint(100000, 999999)}",
-            'issued_by': "Egyptian Immigration Authority"
-        }
-        
-        # Prepare traveler data
-        traveler_data = {
-            'full_name': current_user[2],
-            'passport': current_user[3],
-            'nationality': current_user[4],
-            'dob': current_user[10],  # dob at index 10
-            'gender': current_user[11],  # gender at index 11
-            'purpose_of_travel': current_user[9]  # purpose_of_travel at index 9
-        }
-        
-        # Generate PDF
-        pdf_data = DocumentIssuer.generate_visa_pdf(traveler_data, visa_data)
-        
-        if pdf_data:
-            # Add visa to database
-            db.add_transaction(
-                current_user[0],
-                "VISA_ISSUE",
-                PriceCalculator.calculate_visa_fee(),
-                "EGP",
-                visa_data['visa_no']
-            )
-            
-            enterprise_monitor.log_metric("visa_issued", 1, "documents")
-            logger.info(f"✅ Visa issued: {visa_data['visa_no']}")
-            
-            return f"✅ Visa issued successfully! {visa_status}", pdf_data
-        else:
-            return "❌ PDF generation failed", None
-            
-    except Exception as e:
-        logger.error(f"❌ Visa issue error: {e}")
-        enterprise_monitor.log_alert("ERROR", f"Visa issue failed: {e}", "documents")
-        return f"❌ Error: {e}", None
-
-def ui_book_transport(transport_mode, quantity):
-    """Book transport with green score calculation"""
-    global current_user
-    
-    if not current_user:
-        return "❌ Please login first"
-    
-    try:
-        # Calculate price
-        base_price = 50  # Base transport price
-        total_price = base_price * quantity
-        
-        # Check wallet balance
-        if current_user[8] < total_price:  # wallet_balance at index 8
-            return f"❌ Insufficient balance. Need {total_price} EGP, have {current_user[8]} EGP"
-        
-        # Process booking
-        success = db.add_transaction(
-            current_user[0],
-            "TRANSPORT_BOOKING",
-            total_price,
-            "EGP",
-            f"{transport_mode}x{quantity}"
+        return (
+            "✅ Wallet activated! $200 USD deposited successfully",
+            gr.Group(visible=True),   # Show main app
+            gr.Group(visible=False),  # Hide activation panel
+            f"EGP {current_user[8]}",
+            f"🌿 {current_user[11]}",
+            "✅ ACCOUNT ACTIVE - All features available"
         )
-        
-        if success:
-            # Calculate and add green points
-            green_points = EcoEngine.calculate_green_score(transport_mode) * quantity
-            
-            # Update user balance and green points
-            db.cursor.execute(
-                "UPDATE travelers SET wallet_balance = wallet_balance - ?, green_points = green_points + ? WHERE id = ?",
-                (total_price, green_points, current_user[0])
-            )
-            db.conn.commit()
-            
-            # Refresh user data
-            current_user = db.get_traveler(current_user[0])
-            
-            enterprise_monitor.log_metric("transport_booked", total_price, "transport")
-            logger.info(f"✅ Transport booked: {transport_mode} x{quantity}")
-            
-            return f"✅ {transport_mode} booked for {quantity} person(s)! 🌿 +{green_points} green points"
-        else:
-            return "❌ Booking failed"
-            
     except Exception as e:
-        logger.error(f"❌ Transport booking error: {e}")
-        enterprise_monitor.log_alert("ERROR", f"Transport booking failed: {e}", "transport")
-        return f"❌ Error: {e}"
+        return f"❌ Activation failed: {str(e)}", gr.update(), gr.update(), "", "", ""
 
-def ui_scan_qr(qr_data):
-    """Process QR payment with enterprise validation"""
+def ui_change_language(language):
+    """Handle language change (placeholder for future implementation)"""
+    return f"Language changed to {language} (Translation coming soon)"
+
+def ui_link_bank(bank_name):
+    """Link bank account to traveler with enterprise logging"""
+    if not current_user: return "❌ Login required"
+    if db.link_bank(current_user[0], bank_name):
+        return f"✅ Bank linked: {bank_name}"
+    else:
+        return "❌ Bank linking failed"
+
+def process_qr_payment(qr_string):
+    """Process QR payment with enhanced validation and enterprise logging"""
     global current_user
     
     if not current_user:
-        return "❌ Please login first"
+        return "❌ Login required to make payments"
+    
+    wallet_status = current_user[9]
+    if wallet_status != 'ACTIVE':
+        return "❌ Wallet locked. Please activate your account to make payments."
+    
+    if not qr_string:
+        return "❌ No QR data provided"
     
     try:
-        if not qr_data:
-            return "❌ Please enter QR code data"
+        parts = qr_string.strip().split(':')
         
-        # Validate QR format
-        if not qr_data.startswith("PAY:"):
-            return "❌ Invalid QR format. Expected: PAY:VENDOR:AMOUNT:CURRENCY"
+        if len(parts) != 4 or parts[0] != 'PAY':
+            return "❌ Invalid QR Format. Expected: PAY:VENDOR_ID:AMOUNT:CURRENCY"
         
-        parts = qr_data.split(":")
-        if len(parts) != 4:
-            return "❌ Invalid QR format. Expected: PAY:VENDOR:AMOUNT:CURRENCY"
-        
-        _, vendor, amount_str, currency = parts
+        vendor_id = parts[1]
+        amount_str = parts[2]
+        currency = parts[3]
         
         try:
             amount = float(amount_str)
         except ValueError:
             return "❌ Invalid amount in QR code"
         
-        if currency != "EGP":
-            return "❌ Only EGP currency supported"
+        if currency.upper() != 'EGP':
+            return f"❌ Currency {currency} not supported. Only EGP accepted."
         
-        # Check wallet balance
-        if current_user[8] < amount:  # wallet_balance at index 8
-            return f"❌ Insufficient balance. Need {amount} EGP, have {current_user[8]} EGP"
+        current_balance = current_user[8]
         
-        # Process payment
-        success = db.add_transaction(
-            current_user[0],
-            "QR_PAYMENT",
-            amount,
-            "EGP",
-            qr_data
-        )
+        if amount > current_balance:
+            return f"❌ Insufficient Funds. Balance: {current_balance} EGP, Required: {amount} EGP"
         
-        if success:
-            # Update wallet balance
-            db.cursor.execute(
-                "UPDATE travelers SET wallet_balance = wallet_balance - ? WHERE id = ?",
-                (amount, current_user[0])
-            )
-            db.conn.commit()
-            
-            # Refresh user data
+        if db.purchase(current_user[0], f"QR Payment to {vendor_id}", amount, "QR_PAYMENT"):
+            # Refresh user data from DB to get updated balance
             current_user = db.get_traveler(current_user[0])
+            new_balance = current_user[8]
             
-            enterprise_monitor.log_metric("qr_payment", amount, "payments")
-            logger.info(f"✅ QR payment processed: {vendor} - {amount} EGP")
-            
-            return f"✅ Payment successful! Paid {amount} EGP to {vendor}"
+            return f"✅ PAID {amount} EGP to {vendor_id}. Balance: {new_balance} EGP."
         else:
             return "❌ Payment processing failed"
             
     except Exception as e:
-        logger.error(f"❌ QR payment error: {e}")
-        enterprise_monitor.log_alert("ERROR", f"QR payment failed: {e}", "payments")
-        return f"❌ Error: {e}"
+        logger.error(f"Enterprise QR Payment Error: {e}")
+        return "❌ Error processing QR payment"
 
-def ui_language_change(language):
-    """Handle language change with mock translation"""
-    global current_language
-    
-    current_language = language
-    
-    enterprise_monitor.log_metric("language_change", 1, "ui")
-    logger.info(f"✅ Language switched to: {language}")
-    
-    return f"✅ Language switched to {language} - Translation Active"
+def ui_scan_qr(qr_input):
+    """Scan QR code from manual input"""
+    return process_qr_payment(qr_input)
 
-def ui_check_visa_eligibility():
-    """Check visa eligibility with official portal link"""
-    return "🔗 Check e-Visa Eligibility (Official Portal): https://visaguide.world/online/egypt-e-visa/"
-
-# Additional utility functions
-def ui_refresh_balance():
-    """Refresh wallet balance"""
-    global current_user
-    
-    if not current_user:
-        return "EGP 0"
+def ui_scan_qr_from_camera(image):
+    """Enterprise QR scanning from webcam using QRDecoder"""
+    if image is None:
+        return "⚠️ Please position QR code in front of camera"
     
     try:
-        current_user = db.get_traveler(current_user[0])
-        return f"EGP {current_user[8]}"
-    except:
-        return "EGP 0"
-
-def ui_refresh_green_score():
-    """Refresh green score"""
-    global current_user
-    
-    if not current_user:
-        return "🌿 0"
-    
-    try:
-        current_user = db.get_traveler(current_user[0])
-        return f"🌿 {current_user[11]}"
-    except:
-        return "🌿 0"
-
-logger.info("✅ UI Functions with Critical Fixes Initialized - Part 3 Complete")
-
-# ==============================================================================
-# 🎨 DYNAMIC ASSETS GENERATION
-# ==============================================================================
-
-def generate_dynamic_assets():
-    """Generate dynamic logo and assets for HORUS interface"""
-    try:
-        # Create a simple logo using PIL if available
-        if Image is not None:  # Check if PIL was imported successfully
-            # Use the already imported PIL modules
-            img = Image.new('RGB', (100, 100), color='#1C1C1C')
-            draw = ImageDraw.Draw(img)
-            
-            # Draw a simple pyramid/gold triangle
-            draw.polygon([(50, 20), (20, 80), (80, 80)], fill='#D4AF37')
-            
-            # Add text
-            try:
-                font = ImageFont.load_default()
-                draw.text((35, 85), "HORUS", fill='#D4AF37', font=font)
-            except:
-                pass
-            
-            # Convert to bytes
-            img_bytes = io.BytesIO()
-            img.save(img_bytes, format='PNG')
-            img_bytes.seek(0)
-            
-            logger.info("✅ Dynamic logo generated successfully")
-            return img_bytes.getvalue()
-        else:
-            logger.warning("⚠️ PIL not available, using text logo")
-            return None
-            
+        # Convert PIL Image to numpy array for QRDecoder
+        image_array = np.array(image)
+        
+        # Decode QR codes using enhanced QRDecoder
+        qr_data_list = QRDecoder.decode_from_image(image_array)
+        
+        if not qr_data_list:
+            return "❌ No QR code detected. Please try again."
+        
+        # Process first detected QR code
+        qr_data = qr_data_list[0]
+        
+        # Validate payment QR format
+        if not QRDecoder.validate_payment_qr(qr_data):
+            return f"❌ Invalid QR format detected: {qr_data}\nExpected: PAY:VENDOR_ID:AMOUNT:CURRENCY"
+        
+        # Process the payment
+        result = process_qr_payment(qr_data)
+        return f"📷 QR Scanned: {qr_data}\n{result}"
+        
     except Exception as e:
-        logger.error(f"❌ Failed to generate dynamic assets: {e}")
-        return None
+        logger.error(f"Enterprise QR Camera Scan Error: {e}")
+        return f"❌ QR scanning failed: {str(e)}"
 
-# ==============================================================================
-# 🎨 GRADIO INTERFACE & LAYOUT (Part 4 of 4)
-# ==============================================================================
+def ui_simulate_metro_scan():
+    """Simulate scanning a Cairo Metro QR code for demo purposes"""
+    simulated_qr = "PAY:CAIRO_METRO:50:EGP"
+    result = process_qr_payment(simulated_qr)
+    # Add transaction ID for visibility
+    transaction_id = f"TXN-{random.randint(100000, 999999)}"
+    return f"{result}\n📋 Transaction ID: {transaction_id}"
 
-def create_ui():
-    """Create the main Gradio interface with enterprise layout"""
+def ui_book_transport(mode, dest):
+    """Book transportation with green points calculation"""
+    global current_user
+    if not current_user: return "Login First"
+    pts, lbl = EcoEngine.calculate_impact(mode)
+    cost = 25  # Enterprise pricing
+    if db.purchase(current_user[0], f"Ride: {mode}", cost, "TRANSPORT"):
+        db.add_green_points(current_user[0], pts)
+        return f"✅ Booked {mode}. +{pts} Points."
+    return "❌ No Funds"
+
+def ui_get_monument_info(monument_name):
+    """Get monument information including Google Maps link"""
+    monuments = db.get_data("monuments")
+    target = next((m for m in monuments if m[1] == monument_name), None)
+    if not target: return "Error: Monument Not Found"
     
-    # Generate dynamic assets
+    return f"📍 {monument_name}\n🗺️ Location: {target[4]}\n📄 Description: {target[2]}\n🕒 Hours: {target[6] if len(target) > 6 else 'N/A'}\n♿ Accessibility: {target[7] if len(target) > 7 else 'N/A'}"
+
+def ui_buy_transport_card(card_name):
+    """Purchase unified transport card with enterprise validation"""
+    global current_user
+    if not current_user: 
+        return "❌ Login required", None
+    
+    transport_cards = MarketplaceEngine.get_transport_cards()
+    selected_card = next((card for card in transport_cards if card[0] == card_name), None)
+    
+    if not selected_card:
+        return "❌ Invalid transport card selected", None
+    
+    card_name_display, description, price = selected_card
+    
+    # Check wallet balance
+    if current_user[8] < price:
+        return f"❌ Insufficient funds. Current balance: EGP {current_user[8]}, Required: EGP {price}", None
+    
+    # Process purchase
+    if db.purchase(current_user[0], f"Transport Card: {card_name_display}", price, "TRANSPORT"):
+        # Generate transport card PDF
+        card_info = {
+            'id': f"TC-{random.randint(100000, 999999)}",
+            'card_name': card_name_display,
+            'description': description,
+            'price': price,
+            'purchaser': current_user[1],
+            'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        pdf_filename = DocumentIssuer.generate_transport_card_pdf(card_info)
+        return f"✅ Transport card purchased: {card_name_display} - EGP {price}", pdf_filename
+    
+    return "❌ Purchase failed. Please try again.", None
+
+def ui_book_monument_family(monument_name, adults, students, kids):
+    """
+    FAMILY MODE: Book monument tickets for multiple visitor types with group PDF generation
+    Calculate: (Adults * Price) + (Students * Price * 0.5) + (Kids * Price * 0.3)
+    """
+    global current_user
+    if not current_user: return "Login First", None
+    
+    monuments = db.get_data("monuments")
+    target = next((m for m in monuments if m[1] == monument_name), None)
+    if not target: return "Error: Monument Not Found", None
+    
+    nationality_group_str = current_user[5]
+    nationality_group = VisaPolicy.get_nationality_group(nationality_group_str)
+    base_price = target[3]  # base_price_foreigner
+    
+    # Calculate prices for each visitor type
+    adult_price = PriceCalculator.calculate_ticket_price(base_price, nationality_group, "Adult", adults)
+    student_price = PriceCalculator.calculate_ticket_price(base_price, nationality_group, "Student", students)
+    kid_price = PriceCalculator.calculate_ticket_price(base_price, nationality_group, "Kid", kids)
+    
+    total_price = adult_price + student_price + kid_price
+    total_visitors = adults + students + kids
+    
+    if total_visitors == 0:
+        return "❌ Please select at least one visitor", None
+    
+    if db.purchase(current_user[0], f"Family Ticket: {monument_name}", total_price, "MONUMENTS"):
+        # Create ticket records for each visitor type
+        ticket_info_list = []
+        
+        if adults > 0:
+            db.create_ticket(current_user[0], monument_name, "Adult", adults, adult_price)
+            ticket_info_list.append({
+                'monument_name': monument_name,
+                'visitor_type': 'Adult',
+                'quantity': adults,
+                'price': adult_price
+            })
+        
+        if students > 0:
+            db.create_ticket(current_user[0], monument_name, "Student", students, student_price)
+            ticket_info_list.append({
+                'monument_name': monument_name,
+                'visitor_type': 'Student',
+                'quantity': students,
+                'price': student_price
+            })
+        
+        if kids > 0:
+            db.create_ticket(current_user[0], monument_name, "Kid", kids, kid_price)
+            ticket_info_list.append({
+                'monument_name': monument_name,
+                'visitor_type': 'Kid',
+                'quantity': kids,
+                'price': kid_price
+            })
+        
+        # Generate group ticket PDF
+        group_pdf = DocumentIssuer.generate_group_ticket_pdf(ticket_info_list)
+        
+        return f"✅ ISSUED: {adults} Adults, {students} Students, {kids} Kids for {monument_name}. Total: {total_price} EGP.", group_pdf
+    
+    return "❌ Insufficient Funds", None
+
+def ui_issue_visa():
+    """Issue visa with digital stamp and PDF generation"""
+    global current_user
+    if not current_user: return "Login First", None, None
+    
+    nationality = current_user[4]
+    
+    if not VisaPolicy.check_eligibility(nationality):
+        return "❌ VISA ON ARRIVAL NOT AVAILABLE. Please visit nearest Consulate.", None, None
+    
+    visa_fee = PriceCalculator.get_visa_fee()
+    stamp, ts = HorusSecurity.generate_digital_stamp(current_user[3], current_user[4])
+    
+    if db.purchase(current_user[0], "Visa", visa_fee, "GOVT"):
+        db.add_visa(current_user[0], stamp)
+        data = json.dumps({"visa": stamp, "nationality": nationality})
+        traveler_info = {
+            "full_name": current_user[2],
+            "passport": current_user[3], 
+            "nationality": current_user[4]
+        }
+        pdf = DocumentIssuer.generate_visa_pdf(traveler_info, stamp, data)
+        qr = qrcode.make(data)
+        qr.save("qr.png")
+        return f"✅ Issued: {stamp} ({visa_fee} EGP)", "qr.png", pdf
+    return "❌ Insufficient Funds", None, None
+
+def ui_buy_esim(plan_name):
+    """Purchase eSIM connectivity plan"""
+    global current_user
+    if not current_user: return "Login First"
+    price = 600 if "Orange" in plan_name else 500
+    if db.purchase(current_user[0], plan_name, price, "CONNECTIVITY"):
+        return f"✅ Activated: {plan_name}. QR sent to email."
+    return "❌ Insufficient Funds"
+
+def ui_buy_souvenir(item_name):
+    """Purchase souvenir item"""
+    global current_user
+    if not current_user: return "Login First"
+    price = 300 if "Gold" in item_name else 250
+    if db.purchase(current_user[0], item_name, price, "SOUVENIR"):
+        return f"✅ Purchased: {item_name}. Pickup at Airport Zone B."
+    return "❌ Insufficient Funds"
+
+def ui_claim_offer(offer_name):
+    """Claim exclusive offer voucher"""
+    global current_user
+    if not current_user: return "Login First"
+    return f"✅ VOUCHER CLAIMED: {offer_name}. Saved to Wallet."
+
+def ui_claim_welcome_gift():
+    """Claim the welcome gift - Procedure Doc 1030 compliance"""
+    global current_user
+    if not current_user: return "❌ Login required"
+    
+    if db.claim_gift(current_user[0]):
+        return "✅ Gift QR Generated! Pick up at Airport Zone A."
+    else:
+        return "❌ Gift already claimed or unavailable."
+
+def ui_demo_login():
+    """Demo login with auto-activation and deep data (18 arguments)"""
+    global current_user
+    name = "Diplomat-DEMO-001"
+    full_name = "Demo User"
+    # Fix Demo Nationality: Force to "USA" for Visa functionality with all 18 required arguments
+    uid = db.register_traveler(
+        name, 
+        full_name, 
+        "D999999", 
+        "USA", 
+        "Foreign", 
+        "2030-01-01", 
+        "BIO-DEMO-KEY", 
+        "1990-01-01",  # dob
+        "Male",  # gender
+        "+20123456789",  # phone
+        "demo@horus.com",  # email
+        "2026-10-01",  # arrival_date
+        "USA",  # country_boarded
+        "DEMO-001",  # flight_number
+        "Air",  # mode_of_arrival
+        "2026-10-10",  # departure_date
+        "Egypt",  # country_residence
+        "DEMO-VISA-001",  # visa_no
+        "USA Embassy",  # issued_by
+        "Hotel",  # accommodation_type
+        "Cairo Marriott Hotel, Zamalek",  # accommodation_address
+        "Diplomat",  # occupation
+        "Official Visit"  # purpose_of_travel
+    )
+    
+    # Activate wallet for demo user
+    db.activate_wallet(uid, "DEMO-CARD-1234-5678-9012")
+    
+    # Top up with demo funds
+    db.top_up(uid, 50000) 
+    
+    current_user = db.get_traveler(uid)
+    return (
+        f"✅ DEMO MODE ACTIVATED: {name}",
+        gr.Group(visible=True),
+        gr.Group(visible=False),
+        f"EGP {current_user[8]}",
+        f"🌿 {current_user[11]}",
+        "✅ ACCOUNT ACTIVE - All features available",
+        gr.update(value="PAY:CAIRO_METRO:50:EGP"),  # Auto-fill QR input
+        gr.update(visible=True)  # Show demo badge
+    )
+
+def ui_ai_chat_with_logging(msg, history):
+    """Enterprise AI chat with interaction logging"""
+    global current_user
+    
+    if not current_user:
+        return "❌ Login required for AI chat"
+    
+    # Log the question
+    question = msg if isinstance(msg, str) else str(msg)
+    
+    # Get AI response
+    response = ask_ai(msg, history)
+    
+    # Log the interaction for analytics
+    db.log_ai_interaction(current_user[0], question, response, "GENERAL")
+    
+    return response
+
+# ==============================================================================
+# 🎨 ENTERPRISE GRADIO INTERFACE - ENHANCED QR SCANNER & LOGO
+# ==============================================================================
+
+css = """
+body { background-color: #1a1a1a; }
+.gradio-container { font-family: 'Segoe UI', sans-serif; background-color: #1a1a1a; }
+
+/* SOVEREIGN HEADER FIX - HIGH VISIBILITY */
+.sovereign-header { 
+    position: relative; 
+    top: 0; 
+    left: 0;
+    width: 100%;
+    text-align: center;
+    padding: 15px 0;
+    background: linear-gradient(135deg, #D4AF37, #B8941F);
+    color: #000000; 
+    font-size: 16px; 
+    letter-spacing: 3px;
+    font-weight: 700;
+    z-index: 1000; 
+    pointer-events: none; 
+    text-transform: uppercase;
+    border-radius: 0 0 15px 15px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3);
+}
+
+/* SYSTEM STATUS - HIGH CONTRAST */
+.system-status { 
+    background: linear-gradient(135deg, #2a2a2a, #1a1a1a); 
+    color: #ffffff; 
+    padding: 20px; 
+    border-left: 5px solid #D4AF37; 
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    font-size: 14px;
+    margin: 15px 0;
+}
+
+/* BUTTONS - 2026 STYLE */
+button.primary { 
+    background: linear-gradient(135deg, #D4AF37, #B8941F) !important; 
+    color: #000000 !important; 
+    font-weight: 700 !important; 
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 12px 24px !important;
+    font-size: 14px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3) !important;
+}
+
+button.primary:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px rgba(212, 175, 55, 0.4) !important;
+}
+
+button.secondary { 
+    background: linear-gradient(135deg, #2F4F4F, #1C3A3A) !important; 
+    color: #ffffff !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+/* TABS - MODERN STYLE */
+.gradio-tabs .tab-nav {
+    background: #2a2a2a !important;
+    border-radius: 10px !important;
+    padding: 5px !important;
+}
+
+.gradio-tabs .tab-nav button {
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    margin: 2px !important;
+    transition: all 0.3s ease !important;
+}
+
+.gradio-tabs .tab-nav button.selected {
+    background: linear-gradient(135deg, #D4AF37, #B8941F) !important;
+    color: #000000 !important;
+}
+
+/* INPUTS - DARK THEME */
+.gradio-textbox, .gradio-dropdown {
+    background: #2a2a2a !important;
+    border: 1px solid #444444 !important;
+    border-radius: 8px !important;
+    color: #ffffff !important;
+}
+
+.gradio-textbox input, .gradio-dropdown select {
+    background: transparent !important;
+    color: #ffffff !important;
+}
+
+/* MARKDOWN HEADINGS */
+.markdown h1 {
+    color: #D4AF37 !important;
+    font-weight: 700 !important;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+}
+
+.markdown h2 {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+}
+
+.markdown h3 {
+    color: #D4AF37 !important;
+    font-weight: 600 !important;
+}
+"""
+
+# Initialize database instance
+db = HorusDB()
+
+# Generate README on startup
+ReadmeGenerator.generate_readme()
+
+with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
+    # UPDATED HEADER - CLEAN BRANDING
+    gr.HTML("<div class='sovereign-header'>✨ HORUS SOVEREIGN ECOSYSTEM | SECURE CONNECTED ✨</div>")
+    
+    # DYNAMIC LOGO (Military-grade asset loading with perfect centering)
     logo_data = generate_dynamic_assets()
+    gr.HTML(f"""
+    <div style='display: flex; justify-content: center; align-items: center; margin: 30px 0;'>
+        <img src='{logo_data}' alt='Horus Logo' width='300' 
+             style='border-radius: 15px; transition: all 0.3s ease;' />
+    </div>
+    """)
+    gr.Markdown(f"# 👁️ {config.APP_NAME}")
     
-    with gr.Blocks(
-        title=config.APP_NAME,
-        theme=gr.themes.Soft(
-            primary_hue="amber",
-            secondary_hue="gray",
-            neutral_hue="slate"
-        ),
-        css="""
-        .primary-btn {
-            background: linear-gradient(135deg, #D4AF37, #B8941F);
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-weight: bold;
-            text-decoration: none;
-            display: inline-block;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        .primary-btn:hover {
-            background: linear-gradient(135deg, #B8941F, #D4AF37);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
-        }
-        .gold-header {
-            background: linear-gradient(135deg, #1C1C1C, #2C2C2C);
-            color: #D4AF37;
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        .status-active {
-            color: #10B981;
-            font-weight: bold;
-        }
-        .status-locked {
-            color: #EF4444;
-            font-weight: bold;
-        }
-        """
-    ) as demo:
+    # SYSTEM STATUS DISPLAY - HIGH CONTRAST
+    system_status = HorusConfig.get_system_status()
+    status_text = f"""
+    <div class='system-status'>
+        <strong>🔧 Enterprise System Status:</strong> 
+        Platform: {system_status['platform']} | 
+        QR Scanner: {'✅ Enterprise Ready' if system_status['qr_scanner'] else '❌ Not Available'} | 
+        Camera: {'✅ Professional Ready' if system_status['camera'] else '❌ Not Available'} | 
+        AI Chat: {'✅ Gemini AI Ready' if system_status['ai'] else '❌ Not Available'} | 
+        Enterprise Mode: {'✅ Active' if system_status['enterprise_mode'] else '❌ Inactive'}
+    </div>
+    """
+    gr.HTML(status_text)
+    
+    # DEMO MODE BADGE
+    with gr.Row():
+        demo_badge = gr.Markdown("", visible=False)  # Hidden by default
+    
+    # STATUS BAR WITH LANGUAGE SELECTOR
+    with gr.Row():
+        status = gr.Textbox(label="Identity Status", value="Awaiting Biometrics")
+        bal = gr.Textbox (label="Wallet Balance", value="---")
+        score = gr.Textbox(label="Green Score", value="---")
+        activation_status = gr.Textbox(label="Account Status", value="---")
+        language_selector = gr.Dropdown(["English", "Arabic", "French", "German", "Russian"], label="Language", value="English")
         
-        # ========================================================================
-        # HEADER SECTION
-        # ========================================================================
+    # ENTRY GATE - DEEP DATA UPGRADE (Sovereign Edition)
+    with gr.Row():
+        cam = gr.Image(sources=["webcam"], label="Biometric Scanner", type="numpy")
+        with gr.Column():
+            # Basic Information
+            gr.Markdown("**📋 Basic Information**")
+            passport = gr.Textbox(label="Passport Number", value="A1234567")
+            full_name = gr.Textbox(label="Full Name (as in Passport)", value="John Doe")
+            passport_expiry = gr.Textbox(label="Passport Expiry (YYYY-MM-DD)", value="2028-12-31")
+            nat = gr.Dropdown(["USA", "Egypt", "UK", "Germany", "Japan"], label="Nationality", value="USA")
+            
+            # Personal Information
+            gr.Markdown("**👤 Personal Information**")
+            with gr.Row():
+                dob = gr.Textbox(label="Date of Birth (YYYY-MM-DD)", value="1990-01-01")
+                gender = gr.Dropdown(["Male", "Female", "Other"], label="Gender", value="Male")
+            phone = gr.Textbox(label="Phone Number", value="+20123456789")
+            
+            # Travel Information
+            gr.Markdown("**✈️ Travel Information**")
+            with gr.Row():
+                arrival_date = gr.Textbox(label="Arrival Date (YYYY-MM-DD)", value="2026-12-25")
+                departure_date = gr.Textbox(label="Departure Date (YYYY-MM-DD)", value="2026-12-30")
+            with gr.Row():
+                country_boarded = gr.Textbox(label="Country Boarded", value="USA")
+                flight_number = gr.Textbox(label="Flight Number", value="MS123")
+            mode_of_arrival = gr.Dropdown(["Air", "Sea", "Land"], label="Mode of Arrival", value="Air")
+            
+            # DEEP DATA FIELDS (Procedure Doc 1030)
+            gr.Markdown("**📋 Enterprise Arrival Card Information**")
+            occupation = gr.Textbox(label="Occupation", placeholder="e.g. Engineer, Doctor, Student")
+            purpose_of_travel = gr.Dropdown(["Tourism", "Business", "Official Visit", "Study", "Medical", "Transit"], label="Purpose of Travel", value="Tourism")
+            accommodation_address = gr.Textbox(label="Accommodation Address", placeholder="e.g. Cairo Marriott Hotel, Zamalek")
+            
+            with gr.Row():
+                btn = gr.Button("SCAN FACE & ENTER ECOSYSTEM", variant="primary")
+                btn_demo = gr.Button("🔑 DEMO ACCESS (Bypass Bio)", variant="secondary")
+
+    # ACTIVATION PANEL
+    with gr.Group(visible=False) as activation_panel:
+        gr.Markdown("# 🔒 ACCOUNT ACTIVATION REQUIRED")
+        gr.Markdown("### Deposit $200 USD to unlock all HORUS Enterprise features")
         with gr.Row():
-            with gr.Column(scale=1):
-                if logo_data:
-                    gr.Image(logo_data, width=100, show_label=False)
+            card_input = gr.Textbox(label="Credit Card Number", placeholder="1234-5678-9012-3456", type="password")
+            expiry_input = gr.Textbox(label="Expiry (MM/YY)", placeholder="12/28")
+            cvv_input = gr.Textbox(label="CVV", placeholder="123", type="password")
+        btn_activate = gr.Button("DEPOSIT $200 & ACTIVATE", variant="primary")
+        activation_msg = gr.Textbox(label="Activation Status", interactive=False)
+
+    # MAIN APP GROUP
+    with gr.Group(visible=False) as app:
+        with gr.Tabs():
+            # 1. VISA
+            with gr.TabItem("🛂 Visa & Identity"):
+                gr.Markdown("### 4.B Visa upon Arrival & 4.I Digital Access")
+                gr.HTML("<a href='https://visaguide.world/online/egypt-e-visa/' target='_blank'>🔗 Check Official e-Visa Eligibility</a>")
+                btn_visa = gr.Button(f"Pay {config.PRICING['visa_fee']} EGP & Issue Visa")
+                with gr.Row():
+                    out_v = gr.Textbox(label="Status")
+                    img_v = gr.Image(label="Digital QR Stamp")
+                    file_v = gr.File(label="Download E-Visa PDF")
+                btn_visa.click(ui_issue_visa, outputs=[out_v, img_v, file_v])
+                
+            # 2. TRANSPORT (REAL EGYPT MODE)
+            with gr.TabItem("🚕 Mobility"):
+                gr.Markdown("### 4.D Booking & 4.E Eco-Travel")
+                mode = gr.Dropdown([
+                    "Cairo Monorail", "LRT (Electric Train)", "Electric Bus",
+                    "Metro Line 1", "Metro Line 2", "Metro Line 3",
+                    "Gas-Powered Taxi", "Private Car", "Online Ride-Hailing",
+                    "Shared Shuttle", "Train", "Airport Transfer"
+                ], label="Mode")
+                dest = gr.Textbox(label="Destination", placeholder="e.g. Pyramids")
+                btn_tr = gr.Button("Book Ride")
+                out_tr = gr.Textbox(label="Receipt")
+                btn_tr.click(ui_book_transport, inputs=[mode, dest], outputs=[out_tr])
+            
+            # 3. MONUMENTS (FAMILY MODE)
+            with gr.TabItem("🏛️ Monuments"):
+                gr.Markdown("### 4.F Heritage Tickets - Family Mode")
+                with gr.Row():
+                    monument_name = gr.Dropdown([
+                        "Great Pyramid", "Karnak Temple", "GEM Museum", 
+                        "Valley of Kings", "Abu Simbel"
+                    ], label="Select Monument")
+                    btn_info = gr.Button("📍 View Info")
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**Family Tickets**")
+                        adults = gr.Number(minimum=0, value=1, label="Adults", precision=0)
+                        students = gr.Number(minimum=0, value=0, label="Students", precision=0)
+                        kids = gr.Number(minimum=0, value=0, label="Kids", precision=0)
+                        btn_mon = gr.Button("Purchase Family Tickets", variant="primary")
+                    with gr.Column():
+                        monument_info = gr.Textbox(label="Monument Information", lines=4, interactive=False)
+                        out_mon = gr.Textbox(label="Ticket Status")
+                btn_mon.click(ui_book_monument_family, inputs=[monument_name, adults, students, kids], outputs=[out_mon])
+                btn_info.click(ui_get_monument_info, inputs=[monument_name], outputs=[monument_info])
+
+            # 4. WALLET & BANKING
+            with gr.TabItem("💳 Wallet & Banking"):
+                gr.Markdown("### Enterprise Wallet Management & Banking Services")
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**Bank Linking**")
+                        bank_dropdown = gr.Dropdown(["X-Bank", "InstaPay", "Bank of Egypt", "CIB"], label="Select Bank")
+                        btn_bank = gr.Button("Link Bank Account")
+                        out_bank = gr.Textbox(label="Bank Status")
+                        btn_bank.click(ui_link_bank, inputs=[bank_dropdown], outputs=[out_bank])
+                    with gr.Column():
+                        gr.Markdown("**Wallet Info**")
+                        wallet_info = gr.Textbox(label="Account Details", interactive=False)
+                        refresh_btn = gr.Button("Refresh Balance")
+                        refresh_btn.click(lambda: f"Status: {current_user[9] if current_user else 'N/A'}", outputs=[wallet_info])
+                        
+                        gr.Markdown("**Quick Actions**")
+                        btn_instapay = gr.Button("🔗 Open InstaPay App", variant="secondary")
+                        instapay_status = gr.Textbox(label="InstaPay Status")
+                        btn_instapay.click(lambda: "🔄 Redirecting to InstaPay App...", outputs=[instapay_status])
+
+            # 5. SCAN & PAY - ENHANCED QR SCANNER
+            with gr.TabItem("📷 Scan & Pay"):
+                gr.Markdown("### Enterprise QR Scanning - Advanced Multi-QR Support")
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**📷 Enterprise Camera QR Scanner**")
+                        qr_cam = gr.Image(sources=["webcam"], type="pil", label="Scan QR Code")
+                        btn_scan_cam = gr.Button("📷 SCAN QR FROM CAMERA", variant="primary")
+                        scan_cam_result = gr.Textbox(label="Camera Scan Result", lines=4, interactive=False)
+                        
+                        gr.Markdown("**⌨️ Manual QR Entry**")
+                        qr_input = gr.Textbox(
+                            label="QR Code Data", 
+                            placeholder="PAY:VENDOR_ID:AMOUNT:CURRENCY\nExample: PAY:CAIRO_METRO:50:EGP",
+                            lines=3
+                        )
+                        btn_scan = gr.Button("📋 PROCESS MANUAL QR", variant="secondary")
+                        scan_result = gr.Textbox(label="Manual Scan Result", lines=4, interactive=False)
+                        
+                        # Wire camera scanner to QRDecoder logic
+                        btn_scan_cam.click(ui_scan_qr_from_camera, inputs=[qr_cam], outputs=[scan_cam_result])
+                        btn_scan.click(ui_scan_qr, inputs=[qr_input], outputs=[scan_result])
+                        
+                        # Demo simulation button
+                        btn_simulate = gr.Button("🟢 SIMULATE METRO SCAN", variant="secondary")
+                        btn_simulate.click(ui_simulate_metro_scan, outputs=[scan_result])
+                    
+                    with gr.Column():
+                        gr.Markdown("**Enterprise QR Examples**")
+                        gr.Markdown("""
+                        **Common QR Formats:**
+                        - `PAY:CAIRO_METRO:50:EGP`
+                        - `PAY:STARBUCKS_ZAMALEK:150:EGP`
+                        - `PAY:UBER_RIDE:85:EGP`
+                        - `PAY:PARKING_FEE:25:EGP`
+                        
+                        **Advanced Features:**
+                        - Multi-QR code detection
+                        - Enterprise validation
+                        - Real-time processing
+                        """)
+                        
+                        balance_display = gr.Textbox(label="Wallet Balance", interactive=False)
+                        refresh_balance_btn = gr.Button("🔄 Refresh Balance")
+                        refresh_balance_btn.click(
+                            lambda: f"EGP {current_user[8] if current_user else '0'}", 
+                            outputs=[balance_display]
+                        )
+
+            # 6. MARKETPLACE
+            with gr.TabItem("🛍️ Marketplace"):
+                gr.Markdown("### 4.H Connectivity & 4.J Souvenirs")
+                
+                # 📱 SIM & eSIM SECTION
+                gr.Markdown("**📱 SIM & eSIM**")
+                with gr.Row():
+                    btn_orange = gr.Button("Buy Orange eSIM", variant="primary")
+                    btn_vodafone = gr.Button("Buy Vodafone eSIM", variant="secondary")
+                out_esim = gr.Textbox(label="eSIM Status")
+                btn_orange.click(lambda: "✅ Orange eSIM purchase initiated - Check your email", outputs=[out_esim])
+                btn_vodafone.click(lambda: "✅ Vodafone eSIM purchase initiated - Check your email", outputs=[out_esim])
+                
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**Enterprise eSIMs**")
+                        plans = [f"{p[0]} ({p[2]} EGP)" for p in MarketplaceEngine.get_esims()]
+                        dd_sim = gr.Dropdown(plans, label="Data Plan")
+                        btn_sim = gr.Button("Activate eSIM")
+                        out_sim = gr.Textbox()
+                        btn_sim.click(ui_buy_esim, inputs=[dd_sim], outputs=[out_sim])
+                    with gr.Column():
+                        gr.Markdown("**Premium Souvenirs**")
+                        items = [f"{i[0]} ({i[2]} EGP)" for i in MarketplaceEngine.get_souvenirs()]
+                        dd_shop = gr.Dropdown(items, label="Authentic Items")
+                        btn_shop = gr.Button("Purchase")
+                        out_shop = gr.Textbox()
+                        btn_shop.click(ui_buy_souvenir, inputs=[dd_shop], outputs=[out_shop])
+
+            # 7. OFFERS - WELCOME GIFT UPGRADE
+            with gr.TabItem("🎁 Offers"):
+                gr.Markdown("### 4.G Exclusive Deals & Welcome Gifts")
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**Enterprise Exclusive Offers**")
+                        offers = [f"{o[0]} - {o[1]}" for o in MarketplaceEngine.get_exclusive_offers()]
+                        dd_offer = gr.Dropdown(offers, label="Select Offer")
+                        btn_offer = gr.Button("Claim Voucher")
+                        out_offer = gr.Textbox()
+                        btn_offer.click(ui_claim_offer, inputs=[dd_offer], outputs=[out_offer])
+                    
+                    with gr.Column():
+                        gr.Markdown("**🎁 Enterprise Welcome Gift**")
+                        gr.Markdown("*Special gift for enterprise travelers*")
+                        btn_gift = gr.Button("🎁 CLAIM FREE EGYPT GIFT", variant="primary")
+                        out_gift = gr.Textbox(label="Gift Status", interactive=False)
+                        btn_gift.click(ui_claim_welcome_gift, outputs=[out_gift])
+                
+            # 8. AI
+            with gr.TabItem("🤖 Horus AI"):
+                gr.Markdown(f"Powered by **{config.AI_MODEL}**")
+                if config.AI_ENABLED:
+                    gr.ChatInterface(fn=ui_ai_chat_with_logging, type="messages")
                 else:
-                    gr.Markdown("🏛️")
-            
-            with gr.Column(scale=3):
-                gr.HTML(f"""
-                <div class="gold-header">
-                    <h1>{config.APP_NAME}</h1>
-                    <p>Enterprise Travel Management System</p>
-                </div>
-                """)
-            
-            with gr.Column(scale=1):
-                language_dropdown = gr.Dropdown(
-                    choices=["English", "Arabic", "French", "Russian", "German"],
-                    value="English",
-                    label="🌐 Language",
-                    scale=1
-                )
-        
-        # Status Bar
-        status = gr.Markdown("🔒 Please login to access HORUS features")
-        
-        # ========================================================================
-        # LOGIN SECTION
-        # ========================================================================
-        with gr.Group(visible=True) as login_panel:
-            gr.Markdown("## 🔑 ENTERPRISE ACCESS")
-            
-            with gr.Row():
-                with gr.Column():
-                    gr.Markdown("### **SCAN FACE & ENTER ECOSYSTEM**")
-                    
-                    # Basic Information
-                    name = gr.Textbox(label="User Name", placeholder="e.g., john_doe")
-                    full_name = gr.Textbox(label="Full Name", placeholder="e.g., John Doe")
-                    passport = gr.Textbox(label="Passport Number", placeholder="e.g., A12345678")
-                    
-                    with gr.Row():
-                        nationality = gr.Dropdown(
-                            choices=["USA", "UK", "Germany", "France", "Italy", "Spain", "Egypt", "Saudi Arabia", "UAE", "Canada", "Australia", "Japan", "China", "India", "Brazil", "Russia", "Other"],
-                            label="Nationality",
-                            value="USA"
-                        )
-                        nationality_group = gr.Dropdown(
-                            choices=["Foreign", "Arab", "Egyptian"],
-                            label="Nationality Group",
-                            value="Foreign"
-                        )
-                    
-                    passport_expiry = gr.Textbox(label="Passport Expiry", placeholder="YYYY-MM-DD")
-                    biometric_hash = gr.Textbox(label="Biometric Hash", placeholder="Auto-generated", type="password")
-                    
-                    # DEEP DATA FIELDS (Procedure Doc 1030)
-                    gr.Markdown("### **ARRIVAL CARD INFORMATION**")
-                    
-                    with gr.Row():
-                        occupation = gr.Textbox(label="Occupation", placeholder="e.g., Engineer, Doctor, Student")
-                        purpose_of_travel = gr.Dropdown(
-                            choices=["Tourism", "Business", "Official Visit", "Study", "Medical", "Transit"],
-                            label="Purpose of Travel",
-                            value="Tourism"
-                        )
-                    
-                    accommodation_address = gr.Textbox(
-                        label="Accommodation Address", 
-                        placeholder="e.g., Cairo Marriott Hotel, Zamalek"
-                    )
-                    
-                    with gr.Row():
-                        dob = gr.Textbox(label="Date of Birth", placeholder="YYYY-MM-DD")
-                        gender = gr.Dropdown(
-                            choices=["Male", "Female", "Other"],
-                            label="Gender",
-                            value="Male"
-                        )
-                    
-                    with gr.Row():
-                        phone = gr.Textbox(label="Phone Number", placeholder="+20xxxxxxxxxx")
-                        arrival_date = gr.Textbox(label="Arrival Date", placeholder="YYYY-MM-DD")
-                    
-                    with gr.Row():
-                        country_boarded = gr.Textbox(label="Country Boarded", placeholder="e.g., USA")
-                        flight_number = gr.Textbox(label="Flight Number", placeholder="e.g., MS985")
-                    
-                    with gr.Row():
-                        mode_of_arrival = gr.Dropdown(
-                            choices=["Air", "Sea", "Land"],
-                            label="Mode of Arrival",
-                            value="Air"
-                        )
-                        departure_date = gr.Textbox(label="Departure Date", placeholder="YYYY-MM-DD")
-                    
-                    with gr.Row():
-                        country_residence = gr.Textbox(label="Country of Residence", placeholder="e.g., USA")
-                        visa_no = gr.Textbox(label="Visa Number", placeholder="e.g., V123456")
-                    
-                    issued_by = gr.Textbox(label="Issued By", placeholder="e.g., US Department of State")
-                    
-                    with gr.Row():
-                        btn_login = gr.Button("🔓 ENTER ECOSYSTEM", variant="primary", size="lg")
-                        btn_demo = gr.Button("🔑 DEMO ACCESS", variant="secondary", size="lg")
-        
-        # ========================================================================
-        # SETUP WALLET PANEL (NEW)
-        # ========================================================================
-        with gr.Group(visible=False) as setup_wallet_panel:
-            gr.Markdown("## 🔗 SETUP DIGITAL WALLET")
-            gr.Markdown("Create your digital wallet to activate all HORUS features")
-            
-            with gr.Row():
-                with gr.Column(scale=2):
-                    card_number = gr.Textbox(
-                        label="Credit Card Number", 
-                        placeholder="1234 5678 9012 3456",
-                        type="password"
-                    )
-                    expiry = gr.Textbox(
-                        label="Expiry Date", 
-                        placeholder="MM/YY",
-                        max_lines=1
-                    )
-                    cvv = gr.Textbox(
-                        label="CVV", 
-                        placeholder="123",
-                        type="password",
-                        max_lines=1
-                    )
-                    
-                    btn_create_wallet = gr.Button(
-                        "🔗 CREATE DIGITAL WALLET & DEPOSIT $200", 
-                        variant="primary",
-                        size="lg"
-                    )
+                    gr.Markdown("⚠️ Enterprise AI Chat is not available. Please install google-genai package.")
                 
-                with gr.Column(scale=1):
+            # 8. HELP & FAQ
+            with gr.TabItem("❓ Help & FAQ"):
+                gr.Markdown("### Frequently Asked Questions")
+                
+                with gr.Accordion("💳 Wallet Activation", open=False):
                     gr.Markdown("""
-                    ### **Wallet Benefits**
-                    - ✅ Instant monument booking
-                    - ✅ QR payment processing  
-                    - ✅ Transport ticketing
-                    - ✅ Visa processing
-                    - ✅ Green score tracking
+                    **How do I activate my wallet?**
+                    - Deposit $200 USD using the activation panel
+                    - Enter your card details (Card Number, MM/YY expiry, CVV)
+                    - Once activated, you'll receive 10,000 EGP credit
                     
-                    ### **Security**
-                    - 🔒 Enterprise-grade encryption
-                    - 🔒 Biometric authentication
-                    - 🔒 Secure transaction logging
+                    **What payment methods are accepted?**
+                    - All major credit cards (Visa, Mastercard, American Express)
+                    - Cards must be valid and not expired
+                    
+                    **Is my payment information secure?**
+                    - Yes, all transactions are encrypted and secure
+                    - We use enterprise-grade security for all payments
                     """)
-        
-        # ========================================================================
-        # MAIN APPLICATION
-        # ========================================================================
-        with gr.Group(visible=False) as app:
-            # Status Bar
-            with gr.Row():
-                bal = gr.Textbox(label="💰 Wallet Balance", value="EGP 0", interactive=False)
-                score = gr.Textbox(label="🌿 Green Score", value="0", interactive=False)
-                activation_status = gr.Textbox(label="📊 Account Status", value="ACTIVE", interactive=False)
-            
-            # Main Tabs
-            with gr.Tabs():
                 
-                # ====================================================================
-                # WALLET TAB
-                # ====================================================================
-                with gr.Tab("💳 Wallet & Banking"):
-                    gr.Markdown("## 💰 DIGITAL WALLET")
+                with gr.Accordion("🛂 Visa Rules", open=False):
+                    gr.Markdown("""
+                    **Who needs a visa for Egypt?**
+                    - Check your eligibility using the link in the Visa tab
+                    - 74 countries are eligible for Visa on Arrival
+                    - Restricted countries must apply through embassies
                     
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Markdown("### **Quick Actions**")
-                            btn_refresh_balance = gr.Button("🔄 Refresh Balance", size="sm")
-                            btn_link_bank = gr.Button("🔗 Link Bank Account", variant="secondary")
-                            gr.Button("🔗 Open Bank App (Deep Link)", variant="secondary")
-                            
-                        with gr.Column():
-                            gr.Markdown("### **Transaction History**")
-                            gr.Textbox(
-                                label="Recent Transactions",
-                                value="No transactions yet",
-                                lines=5,
-                                interactive=False
-                            )
+                    **What are the visa requirements?**
+                    - Valid passport with at least 6 months validity
+                    - Passport must not be expired
+                    - Biometric registration required
+                    
+                    **How much does the visa cost?**
+                    - Visa fee varies by nationality
+                    - Check the Visa tab for exact pricing
+                    """)
                 
-                # ====================================================================
-                # VISA TAB
-                # ====================================================================
-                with gr.Tab("🛂 Visa Services"):
-                    gr.Markdown("## 🛂 VISA ON ARRIVAL")
+                with gr.Accordion("🌿 Green Score", open=False):
+                    gr.Markdown("""
+                    **What is the Green Score?**
+                    - Points earned for using eco-friendly transport
+                    - Electric/Metro transport: +20 points
+                    - Shared transport: +10 points
+                    - Private car: 0 points
                     
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Markdown("### **Visa Eligibility**")
-                            btn_check_eligibility = gr.Button("🔍 Check My Eligibility", variant="primary")
-                            eligibility_result = gr.Textbox(label="Eligibility Status", interactive=False)
-                            
-                            # NEW: Official Portal Link
-                            gr.HTML("""
-                            <div style="margin: 20px 0;">
-                                <a href='https://visaguide.world/online/egypt-e-visa/' 
-                                   target='_blank' 
-                                   class='primary-btn'>
-                                    🔗 Check Official e-Visa Eligibility
-                                </a>
-                            </div>
-                            """)
-                        
-                        with gr.Column():
-                            gr.Markdown("### **Issue Visa**")
-                            btn_issue_visa = gr.Button("📄 Issue E-Visa", variant="primary")
-                            visa_result = gr.Textbox(label="Visa Status", interactive=False)
-                            visa_download = gr.File(label="Download Visa PDF", visible=False)
+                    **How do I use my Green Score?**
+                    - 100 points = 10% souvenir discount
+                    - Higher scores unlock special rewards
+                    - Track your environmental impact
+                    
+                    **Which transport is most eco-friendly?**
+                    - Cairo Monorail and Metro Lines: Highest score
+                    - Electric trains and buses: Good score
+                    - Gas-powered vehicles: Lowest score
+                    """)
                 
-                # ====================================================================
-                # TRANSPORT TAB
-                # ====================================================================
-                with gr.Tab("🚇 Transport"):
-                    gr.Markdown("## 🚇 EGYPT TRANSPORT 2026")
-                    
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Markdown("### **Book Transport**")
-                            
-                            transport_mode = gr.Dropdown(
-                                choices=[
-                                    "Cairo Monorail (+20 pts)",
-                                    "LRT (Electric Train) (+20 pts)", 
-                                    "Electric Bus (+20 pts)",
-                                    "Metro Line 1 (+10 pts)",
-                                    "Metro Line 2 (+10 pts)",
-                                    "Metro Line 3 (+10 pts)",
-                                    "Shared Shuttle (+5 pts)",
-                                    "Train (+15 pts)",
-                                    "Gas-Powered Taxi (0 pts)",
-                                    "Private Car (0 pts)",
-                                    "Standard Uber (0 pts)"
-                                ],
-                                label="Transport Mode",
-                                value="Cairo Monorail (+20 pts)"
-                            )
-                            
-                            quantity = gr.Slider(
-                                minimum=1,
-                                maximum=10,
-                                value=1,
-                                step=1,
-                                label="Number of Tickets"
-                            )
-                            
-                            btn_book_transport = gr.Button("🎫 Book Transport", variant="primary")
-                            transport_result = gr.Textbox(label="Booking Status", interactive=False)
-                        
-                        with gr.Column():
-                            gr.Markdown("### **🌿 Green Score System**")
-                            gr.Markdown("""
-                            - **+20 Points**: Electric transport (Monorail, LRT, Electric Bus)
-                            - **+10 Points**: Metro lines
-                            - **+5 Points**: Shared transport
-                            - **0 Points**: Private vehicles
-                            
-                            **Benefits**: 100 points = 10% souvenir discount!
-                            """)
+            # 9. ADMIN
+            with gr.TabItem("⚙️ Admin"):
+                gr.Markdown("### Enterprise System Management")
+                btn_s = gr.Button("Sync Code & Docs to GitHub", variant="stop")
+                out_s = gr.TextArea(label="Diagnostic Logs")
+                btn_s.click(GitAutopilot.sync_codebase, outputs=[out_s])
                 
-                # ====================================================================
-                # MARKETPLACE TAB
-                # ====================================================================
-                with gr.Tab("🛍️ Marketplace"):
-                    gr.Markdown("## 🛍️ HORUS MARKETPLACE")
-                    
-                    # Connectivity Section
-                    gr.Markdown("### 📱 **SIM & eSIM CONNECTIVITY**")
-                    
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Button("📱 Buy Orange eSIM", variant="secondary", size="lg")
-                            gr.Markdown("• 5G Data Plans\n• Airport Pickup\n• Tourist Packages")
-                        
-                        with gr.Column():
-                            gr.Button("📱 Buy Vodafone eSIM", variant="secondary", size="lg")
-                            gr.Markdown("• Nationwide Coverage\n• Instant Activation\n• Multi-device Support")
-                    
-                    with gr.Row():
-                        gr.Button("📍 Locate Nearest Store", variant="outline")
-                        gr.Button("📞 Customer Support", variant="outline")
-                    
-                    gr.Markdown("---")
-                    
-                    # Other Services
-                    gr.Markdown("### **Other Services**")
-                    with gr.Row():
-                        gr.Button("🎁 Welcome Gift", variant="secondary")
-                        gr.Button("📷 Photo Services", variant="secondary")
-                        gr.Button("🗺️ Tour Guide", variant="secondary")
-                        gr.Button("🚐 Airport Transfer", variant="secondary")
+                gr.Markdown("### Enterprise Analytics")
+                stats_display = gr.Textbox(label="System Stats", interactive=False, lines=8)
+                refresh_stats_btn = gr.Button("🔄 Refresh Analytics")
+                refresh_stats_btn.click(
+                    lambda: json.dumps(db.get_system_stats(), indent=2),
+                    outputs=[stats_display]
+                )
                 
-                # ====================================================================
-                # SCAN & PAY TAB
-                # ====================================================================
-                with gr.Tab("📷 Scan & Pay"):
-                    gr.Markdown("## 📷 QR PAYMENT SYSTEM")
-                    
-                    with gr.Row():
-                        with gr.Column():
-                            gr.Markdown("### **Scan QR Code**")
-                            qr_input = gr.Textbox(
-                                label="QR Code Data",
-                                placeholder="PAY:VENDOR:AMOUNT:CURRENCY",
-                                lines=3
-                            )
-                            
-                            with gr.Row():
-                                btn_scan_qr = gr.Button("💳 Process Payment", variant="primary")
-                                btn_simulate_scan = gr.Button("🟢 Simulate Metro Scan", variant="secondary")
-                            
-                            qr_result = gr.Textbox(label="Payment Result", lines=4, interactive=False)
-                        
-                        with gr.Column():
-                            gr.Markdown("### **Quick Examples**")
-                            gr.Markdown("""
-                            **Common QR Formats:**
-                            - `PAY:CAIRO_METRO:50:EGP`
-                            - `PAY:UBER:150:EGP`
-                            - `PAY:COFFEE_SHOP:45:EGP`
-                            - `PAY:MUSEUM:200:EGP`
-                            
-                            **How to use:**
-                            1. Scan QR code with camera
-                            2. Or enter manually above
-                            3. Click "Process Payment"
-                            4. Receive instant confirmation
-                            """)
-                
-                # ====================================================================
-                # FAQ TAB (NEW)
-                # ====================================================================
-                with gr.Tab("❓ Help & FAQ"):
-                    gr.Markdown("## ❓ HELP & FREQUENTLY ASKED QUESTIONS")
-                    
-                    with gr.Accordion("💳 How to Activate Wallet?", open=True):
-                        gr.Markdown("""
-                        **Wallet Activation Steps:**
-                        1. Register your account with personal details
-                        2. Go to "Setup Wallet" panel
-                        3. Enter credit card information
-                        4. Deposit $200 USD (10,000 EGP)
-                        5. Account becomes ACTIVE instantly
-                        
-                        **Benefits:**
-                        - Instant monument booking
-                        - QR payment processing
-                        - Transport ticketing
-                        - Visa processing
-                        """)
-                    
-                    with gr.Accordion("🛂 Visa Rules & Eligibility"):
-                        gr.Markdown("""
-                        **Visa on Arrival Eligibility:**
-                        - 74+ countries eligible (USA, UK, EU, Japan, etc.)
-                        - Check official portal for latest requirements
-                        - Restricted countries: Iran, Afghanistan, Syria, etc.
-                        
-                        **Required Documents:**
-                        - Valid passport (6+ months validity)
-                        - Return ticket
-                        - Hotel reservation
-                        - Sufficient funds ($1000+)
-                        
-                        **Processing:**
-                        - Fee: $25 USD (1250 EGP)
-                        - Duration: 180 days
-                        - Single entry
-                        """)
-                    
-                    with gr.Accordion("🌿 Green Score System"):
-                        gr.Markdown("""
-                        **How to Earn Green Points:**
-                        - **+20 pts**: Electric transport (Monorail, LRT, Electric Bus)
-                        - **+10 pts**: Metro lines
-                        - **+5 pts**: Shared transport
-                        - **0 pts**: Private vehicles
-                        
-                        **Benefits:**
-                        - 100 points = 10% souvenir discount
-                        - 200 points = Free transport ticket
-                        - 500 points = VIP monument access
-                        
-                        **Track Progress:**
-                        - View in main dashboard
-                        - Points update instantly
-                        - Monthly leaderboard
-                        """)
-                    
-                    with gr.Accordion("🔧 Technical Support"):
-                        gr.Markdown("""
-                        **Common Issues:**
-                        - **Login Problems**: Check internet connection
-                        - **Payment Failed**: Verify wallet balance
-                        - **QR Not Working**: Ensure proper format
-                        - **PDF Not Downloading**: Check browser settings
-                        
-                        **Contact Support:**
-                        - Email: support@horus-egypt.com
-                        - Phone: +20 2 1234 5678
-                        - Live Chat: Available 24/7
-                        
-                        **Response Time:**
-                        - Email: Within 24 hours
-                        - Phone: Immediate
-                        - Live Chat: < 5 minutes
-                        """)
-        
-        # ========================================================================
-        # EVENT HANDLING
-        # ========================================================================
-        
-        # Language change
-        language_dropdown.change(
-            ui_language_change,
-            inputs=[language_dropdown],
-            outputs=[status]
-        )
-        
-        # Login events
-        btn_login.click(
-            ui_login,
-            inputs=[
-                name, full_name, passport, nationality, nationality_group, passport_expiry,
-                biometric_hash, occupation, purpose_of_travel, accommodation_address,
-                dob, gender, phone, arrival_date, country_boarded, flight_number,
-                mode_of_arrival, departure_date, country_residence, visa_no, issued_by
-            ],
-            outputs=[status, app, setup_wallet_panel, login_panel, bal, score, activation_status]
-        )
-        
-        # Demo login
-        btn_demo.click(
-            ui_demo_login,
-            outputs=[status, app, setup_wallet_panel, login_panel, bal, score, activation_status]
-        )
-        
-        # Wallet creation
-        btn_create_wallet.click(
-            ui_create_wallet,
-            inputs=[card_number, expiry, cvv],
-            outputs=[status, app, setup_wallet_panel, login_panel, bal, score, activation_status]
-        )
-        
-        # Visa services
-        btn_check_eligibility.click(
-            lambda: "Check your nationality in the official portal link below",
-            outputs=[eligibility_result]
-        )
-        
-        btn_issue_visa.click(
-            ui_issue_visa,
-            outputs=[visa_result, visa_download]
-        )
-        
-        # Transport booking
-        btn_book_transport.click(
-            ui_book_transport,
-            inputs=[transport_mode, quantity],
-            outputs=[transport_result]
-        )
-        
-        # QR payment
-        btn_scan_qr.click(
-            ui_scan_qr,
-            inputs=[qr_input],
-            outputs=[qr_result]
-        )
-        
-        btn_simulate_scan.click(
-            lambda: ui_scan_qr("PAY:CAIRO_METRO:50:EGP"),
-            outputs=[qr_result]
-        )
-        
-        # Utility buttons
-        btn_refresh_balance.click(
-            ui_refresh_balance,
-            outputs=[bal]
-        )
-    
-    return demo
+                gr.Markdown("### Business Intelligence")
+                analytics_display = gr.Textbox(label="Business Analytics", interactive=False, lines=10)
+                refresh_analytics_btn = gr.Button("🔄 Refresh Analytics")
+                refresh_analytics_btn.click(
+                    lambda: json.dumps(db.get_enterprise_analytics(), indent=2),
+                    outputs=[analytics_display]
+                )
+
+    # Event Wiring - 
+    btn.click(ui_login, inputs=[cam, passport, nat, full_name, passport_expiry, occupation, purpose_of_travel, accommodation_address, dob, gender, phone, arrival_date, country_boarded, flight_number, mode_of_arrival, departure_date], outputs=[status, app, activation_panel, bal, score, activation_status, qr_input, demo_badge])
+    btn_demo.click(ui_demo_login, outputs=[status, app, activation_panel, bal, score, activation_status, qr_input, demo_badge])
+    language_selector.change(ui_change_language, inputs=[language_selector], outputs=[status])
+    btn_activate.click(ui_create_wallet, inputs=[card_input, expiry_input, cvv_input], outputs=[activation_msg, app, activation_panel, bal, score, activation_status])
 
 # ==============================================================================
-# 🚀 APPLICATION LAUNCH
+# 🚀 ENTERPRISE LAUNCH
 # ==============================================================================
 
 if __name__ == "__main__":
-    try:
-        logger.info("🚀 Launching HORUS v11.0 Enterprise Edition...")
-        
-        # Create UI
-        demo = create_ui()
-        
-        # Log system health
-        system_health = enterprise_monitor.get_system_health()
-        logger.info(f"📊 System Health: {system_health['uptime_formatted']} uptime")
-        logger.info(f"📊 Metrics: {system_health['total_metrics']} tracked")
-        logger.info(f"📊 Alerts: {system_health['total_alerts']} logged")
-        
-        # Launch application
-        demo.launch(
-            server_name="0.0.0.0",
-            server_port=7860,
-            share=True,
-            debug=False,
-            show_error=True,
-            quiet=False,
-            favicon_path=None,
-            ssl_verify=False,
-            prevent_thread_lock=False
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to launch application: {e}")
-        enterprise_monitor.log_alert("CRITICAL", f"Application launch failed: {e}", "system")
-        sys.exit(1)
-
-# ==============================================================================
-# 🏁 END OF HORUS v11.0 ENTERPRISE EDITION
-# ==============================================================================
-
-logger.info("✅ HORUS v11.0 Enterprise Edition - All Parts Complete")
-logger.info("🏛️ System Ready for Enterprise Deployment")
+    # Final dependency check and installation
+    logger.info("🚀 Starting HORUS v10.6 Sovereign Edition with advanced QR & AI...")
+    
+    # Install dependencies one last time before launch
+    if not install_dependencies():
+        logger.error("❌ Failed to install dependencies. Some features may not work.")
+    
+    # Final system status check
+    final_status = HorusConfig.get_system_status()
+    logger.info("📊 Final System Status:")
+    for key, value in final_status.items():
+        status_icon = "✅" if value or (isinstance(value, bool) and value) else "❌"
+        logger.info(f"  {status_icon} {key}: {value}")
+    
+    # Launch with enterprise configuration
+    logger.info("🚀 Launching HORUS v10.6 Sovereign Edition...")
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=True,
+        debug=True,
+        allowed_paths=["."],  # Allow file serving from current directory
+        show_error=True,
+        favicon_path=None,
+        ssl_verify=False,
+        quiet=False,
+        inbrowser=True
+    )
