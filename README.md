@@ -142,6 +142,6 @@ Open the generated local URL (e.g. `http://127.0.0.1:7860`) in your browser.
 ---
 
 <p align="center">
-  <b>Architect:</b> Ahmed Geneed (Mohamed Sayed Ahmed)<br/>
+  <b>Architects:</b> Ahmed Geneed + Mohamed Geneed<br/>
   <b>Copyright Registry Submission – Arab Republic of Egypt (2026)</b>
 </p>
