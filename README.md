@@ -73,9 +73,10 @@ graph TD
 ### 🏛️ III. Multi-Tier Dynamic Group Ticketing
 * **Dynamic Basket Calculations:** Auto-applies discounts for Students (ISIC standard: 50%), Children (30%), and regional Arab/Egyptian subsidies while maintaining price floors.
 
-### 🤖 IV. Multimodal Gemini 3.0 AI Engine
+### 🤖 IV. Multimodal Gemini 3.6 AI Engine & Fallback Chain
 * **Load Distribution:** Automated load-balancing across key pools (`GEMINI_KEYS`).
-* **Resilience:** Fallback error handling and automatic model selection (`gemini-2.5-flash` / `gemini-3.0-flash`).
+* **Multi-Model Fallback Resilience:** Automatic, zero-latency model degradation chain if quota or rate-limits are hit:
+  `gemini-3.6-flash` ➔ `gemini-3.5-flash` ➔ `gemini-3-flash-preview` ➔ `gemini-2.5-flash`
 
 ### 🌿 V. Eco-Gamification Engine
 * **Green Transit Scoring:** Rewards travelers using sustainable transit (Cairo Monorail, LRT, Electric Buses: +20 pts; Metro: +10 pts) with dynamic marketplace discounts.

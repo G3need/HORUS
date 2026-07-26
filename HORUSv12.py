@@ -665,7 +665,7 @@ class HorusConfig:
     AI_FALLBACK_MODELS: list = field(default_factory=lambda: [
         "gemini-3.6-flash",
         "gemini-3.5-flash",
-        "gemini-3.0-flash",
+        "gemini-3-flash-preview",
         "gemini-2.5-flash"
     ])
     AI_ENABLED: bool = False  # Set after import checking
@@ -2529,7 +2529,7 @@ def ask_ai(msg, history):
         return "⚠️ Configuration Error: Please set GEMINI_KEYS environment variable with your API key."
     
     client = genai.Client(api_key=key)
-    models_to_try = [config.AI_MODEL] + [m for m in getattr(config, 'AI_FALLBACK_MODELS', ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.0-flash", "gemini-2.5-flash"]) if m != config.AI_MODEL]
+    models_to_try = [config.AI_MODEL] + [m for m in getattr(config, 'AI_FALLBACK_MODELS', ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"]) if m != config.AI_MODEL]
     
     last_error = None
     for model_name in models_to_try:
