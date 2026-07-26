@@ -30,7 +30,7 @@
 ### Key Innovations:
 * **Decoupled Logic Engines:** Policy enforcement (Visa Rules, Dynamic Pricing, Currency Multipliers) is completely decoupled from the presentation layer to ensure immutable rule application.
 * **Biometric Zero-Knowledge Hashing:** Facial features are converted directly to non-reversible `SHA-512` hashes—raw biometric images are never stored or transmitted.
-* **Smart AI Key Rotation:** Integrated Multimodal AI (Google Gemini 3.0) equipped with automated round-robin key rotation, rate-limit resilience, and context awareness.
+* **Smart AI Key Rotation:** Integrated Multimodal AI (Google Gemini 3.6 Flash) equipped with automated round-robin key rotation, rate-limit resilience, and context awareness.
 * **Integrated Fintech & Reverse QR:** Transforms any device into a secure point-of-sale terminal for instant transit, monument ticketing, and merchant transactions.
 
 ---
