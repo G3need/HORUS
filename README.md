@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/VERSION-12.0.0--ENTERPRISE-gold?style=for-the-badge&logo=python" alt="Version 12.0.0"/>
   <img src="https://img.shields.io/badge/SECURITY-SHA--512_CRYPTOGRAPHIC-blue?style=for-the-badge&logo=shield" alt="Security"/>
-  <img src="https://img.shields.io/badge/AI_ENGINE-GEMINI_3.0_GENAI-purple?style=for-the-badge&logo=google" alt="AI Engine"/>
+  <img src="https://img.shields.io/badge/AI_ENGINE-GEMINI_3.6_FLASH-purple?style=for-the-badge&logo=google" alt="AI Engine"/>
   <img src="https://img.shields.io/badge/COMPLIANCE-EGYPTIAN_DATA_LAW-green?style=for-the-badge" alt="Compliance"/>
 </p>
 
@@ -142,6 +142,6 @@ Open the generated local URL (e.g. `http://127.0.0.1:7860`) in your browser.
 ---
 
 <p align="center">
-  <b>Architect:</b> Ahmed Geneed (Mohamed Sayed Hassan Sayed Ahmed)<br/>
+  <b>Architect:</b> Ahmed Geneed (Mohamed Sayed Ahmed)<br/>
   <b>Copyright Registry Submission – Arab Republic of Egypt (2026)</b>
 </p>

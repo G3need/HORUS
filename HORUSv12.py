@@ -661,7 +661,13 @@ class HorusConfig:
     """Enterprise configuration for HORUS v10.4"""
     APP_NAME: str = "Horus Key Platinum v10.6 - Sovereign Edition"
     DB_NAME: str = "horus_sovereign.db"
-    AI_MODEL: str = "gemini-3-flash-preview"
+    AI_MODEL: str = "gemini-3.6-flash"
+    AI_FALLBACK_MODELS: list = field(default_factory=lambda: [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.0-flash",
+        "gemini-2.5-flash"
+    ])
     AI_ENABLED: bool = False  # Set after import checking
     VERSION: str = "11.1.0-Sovereign"
 
@@ -690,10 +696,10 @@ class HorusConfig:
     # Hardcoded Gemini API Keys
     GEMINI_KEYS: list = field(default_factory=lambda: [
         k.strip() for k in (
-            os.getenv(GEMINI_KEYS) or 
-            os.getenv(GEMINI_API_KEY) or 
-            os.getenv(GOOGLE_API_KEY) or 
-        ).split(,) if k.strip()
+            os.getenv("GEMINI_KEYS") or 
+            os.getenv("GEMINI_API_KEY") or 
+            os.getenv("GOOGLE_API_KEY") or ""
+        ).split(",") if k.strip()
     ])
 
     def __post_init__(self):
@@ -2514,7 +2520,7 @@ def get_rotated_key():
         return valid_keys[0]
 
 def ask_ai(msg, history):
-    """Enterprise AI chat interface with comprehensive error handling and logging"""
+    """Enterprise AI chat interface with multi-model fallback chain (3.6 -> 3.5 -> 3.0 -> 2.5)"""
     if not config.AI_ENABLED:
         return "⚠️ Enterprise AI Chat is not available. Please install google-genai package."
     
@@ -2522,17 +2528,24 @@ def ask_ai(msg, history):
     if not key: 
         return "⚠️ Configuration Error: Please set GEMINI_KEYS environment variable with your API key."
     
-    try:
-        client = genai.Client(api_key=key)
-        res = client.models.generate_content(
-            model=config.AI_MODEL, 
-            contents=msg
-        )
-        logger.info(f"Enterprise AI response generated for message: {msg[:50]}...")
-        return res.text
-    except Exception as e: 
-        logger.error(f"Enterprise AI chat error: {str(e)}")
-        return f"AI Error: {str(e)}"
+    client = genai.Client(api_key=key)
+    models_to_try = [config.AI_MODEL] + [m for m in getattr(config, 'AI_FALLBACK_MODELS', ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.0-flash", "gemini-2.5-flash"]) if m != config.AI_MODEL]
+    
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            res = client.models.generate_content(
+                model=model_name, 
+                contents=msg
+            )
+            logger.info(f"Enterprise AI response generated using {model_name} for message: {msg[:50]}...")
+            return res.text
+        except Exception as e:
+            logger.warning(f"⚠️ Model {model_name} failed: {e}. Trying next fallback model...")
+            last_error = e
+            
+    logger.error(f"Enterprise AI chat error across all models: {last_error}")
+    return f"AI Error (All models exhausted): {last_error}"
 
 # ==============================================================================
 # 📱 ENTERPRISE UI (PLATINUM DASHBOARD) - ENHANCED WITH SELF-HEALING
