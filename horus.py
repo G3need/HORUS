@@ -3491,7 +3491,10 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
             with gr.TabItem("🤖 Horus AI"):
                 gr.Markdown(f"Powered by **{config.AI_MODEL}**")
                 if config.AI_ENABLED:
-                    gr.ChatInterface(fn=ui_ai_chat_with_logging, type="messages")
+                    try:
+                        gr.ChatInterface(fn=ui_ai_chat_with_logging, type="messages")
+                    except TypeError:
+                        gr.ChatInterface(fn=ui_ai_chat_with_logging)
                 else:
                     gr.Markdown("⚠️ Enterprise AI Chat is not available. Please install google-genai package.")
                 
