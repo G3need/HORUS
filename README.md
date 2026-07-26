@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://colab.research.google.com/github/G3need/HORUS/blob/main/horus.py">
+  <a href="https://colab.research.google.com/github/G3need/HORUS/blob/main/HORUS_Colab_Launcher.ipynb">
     <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab" height="32"/>
   </a>
 </p>
