@@ -29,7 +29,7 @@ if os.path.exists("/content"):
         subprocess.run(["apt-get", "install", "-y", "-qq", "libzbar0"], check=True)
 
 # 2. Lazy Imports
-print("🚀 Launching HORUS v11...")
+print("🚀 Launching HORUS v12.0 Sovereign Edition...")
 gr = _install_and_import("gradio")
 qrcode = _install_and_import("qrcode")
 reportlab = _install_and_import("reportlab")
@@ -212,8 +212,15 @@ enterprise_monitor = EnterpriseMonitor()
 def is_linux_colab():
     """Check if running on Linux (Google Colab) environment"""
     try:
-        return platform.system() == "Linux" and "google.colab" in sys.modules
-    except:
+        if platform.system() != "Linux":
+            return False
+        return (
+            "google.colab" in sys.modules or
+            "COLAB_GPU" in os.environ or
+            "COLAB_RELEASE_TAG" in os.environ or
+            os.path.exists("/content")
+        )
+    except Exception:
         return False
 
 def check_package_installed(package_name):
@@ -658,8 +665,8 @@ from typing import List, Dict, Optional, Tuple
 
 @dataclass
 class HorusConfig:
-    """Enterprise configuration for HORUS v10.4"""
-    APP_NAME: str = "Horus Key Platinum v10.6 - Sovereign Edition"
+    """Enterprise configuration for HORUS v12.0"""
+    APP_NAME: str = "Horus Key Enterprise v12.0 - Sovereign Edition"
     DB_NAME: str = "horus_sovereign.db"
     AI_MODEL: str = "gemini-3.6-flash"
     AI_FALLBACK_MODELS: list = field(default_factory=lambda: [
@@ -669,7 +676,7 @@ class HorusConfig:
         "gemini-2.5-flash"
     ])
     AI_ENABLED: bool = False  # Set after import checking
-    VERSION: str = "11.1.0-Sovereign"
+    VERSION: str = "12.0.0-Sovereign"
 
     # Enterprise pricing (EGP)
     PRICING: dict = field(default_factory=lambda: {
@@ -706,10 +713,10 @@ class HorusConfig:
         """Post-initialization to set dynamic values"""
         # Update dynamic values based on import status
         if 'import_status' in globals():
-            self.QR_SCANNER_ENABLED = import_status.get('pyzbar', False)
-            self.CAMERA_ENABLED = import_status.get('opencv', False)
+            self.QR_SCANNER_ENABLED = HorusConfig.QR_SCANNER_ENABLED = import_status.get('pyzbar', False)
+            self.CAMERA_ENABLED = HorusConfig.CAMERA_ENABLED = import_status.get('opencv', False)
             # EXPLICIT: Set AI_ENABLED based on actual import success
-            self.AI_ENABLED = import_status.get('genai', False)
+            self.AI_ENABLED = HorusConfig.AI_ENABLED = import_status.get('genai', False)
             # Disable features gracefully if dependencies are missing
             if not import_status.get('pyzbar', False):
                 logger.warning("⚠️ QR Scanner disabled - pyzbar not available")
@@ -3218,7 +3225,7 @@ db = HorusDB()
 # Generate README on startup
 ReadmeGenerator.generate_readme()
 
-with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
+with gr.Blocks(css=css, title="Horus Key Enterprise v12.0") as demo:
     # UPDATED HEADER - CLEAN BRANDING
     gr.HTML("<div class='sovereign-header'>✨ HORUS SOVEREIGN ECOSYSTEM | SECURE CONNECTED ✨</div>")
     
@@ -3596,7 +3603,7 @@ with gr.Blocks(css=css, title="Horus Key Platinum v10.4") as demo:
 
 if __name__ == "__main__":
     # Final dependency check and installation
-    logger.info("🚀 Starting HORUS v10.6 Sovereign Edition with advanced QR & AI...")
+    logger.info("🚀 Starting HORUS v12.0 Sovereign Edition with advanced QR & AI...")
     
     # Install dependencies one last time before launch
     if not install_dependencies():
@@ -3610,7 +3617,7 @@ if __name__ == "__main__":
         logger.info(f"  {status_icon} {key}: {value}")
     
     # Launch with enterprise configuration
-    logger.info("🚀 Launching HORUS v10.6 Sovereign Edition...")
+    logger.info("🚀 Launching HORUS v12.0 Sovereign Edition...")
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
