@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environment files and secrets
+.env
+.env.*
+*.pem
+*.key
+*.cert
+
+# IDE & Editor files
+.vscode/
+.idea/
+.windsurf/
+.windsurfrules
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite
+*.db

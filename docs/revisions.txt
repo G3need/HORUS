@@ -1,0 +1,16 @@
+Here’s a summarized version of your remarks regarding "Horoski":
+
+1. **ID Requirement**: Ensure an ID field is included; currently, there's no name field.
+2. **Traveling Requirements**: Will provide a list addressing travel-related requirements.
+3. **Wallet Integration**: Clarify how users will upload and link the wallet to services like X bank.
+4. **Green Score**: Define what a "green score" is and how points are earned during bookings.
+5. **Visa on Arrival**: Include links to countries that offer visa on arrival for specific nationalities.
+6. **Online Booking**: Add airport transfer and rides information, and allow broader terminology (e.g., just "online" instead of "Uber").
+7. **Transportation Options**: Include various transit modes available in Egypt, such as electric buses and trains.
+8. **Monuments Linking**: Improve linking to monuments for added user information.
+9. **Souvenir Marketplace**: This section is acceptable as is.
+10. **eSIM Integration**: Clarify if eSIM options can be integrated with providers and how tourists can choose from different categories.
+11. **Ticket Purchasing**: Determine if tickets can be purchased for individuals or families, and explore category-based tickets (e.g., students, kids).
+12. **QR Code Functionality**: The app should read QR codes to enable wallet payments directly in various locations, allowing transfers to different wallets.
+
+Overall, the app needs enhancements in user identification, financial transactions, ticketing processes, and transportation options.
