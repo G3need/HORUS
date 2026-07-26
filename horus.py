@@ -2569,58 +2569,58 @@ def ui_login(image, passport, nationality, full_name, passport_expiry, occupatio
     
     # CRITICAL FIX: Check for None image first
     if image is None:
-        return "⚠️ Waiting for biometric scan...", gr.update(), gr.update(), "", "", ""
+        return "⚠️ Waiting for biometric scan...", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # Robust numpy check
     if not isinstance(image, np.ndarray):
-        return "❌ HARDWARE ERROR: WEBCAM DATA INVALID", gr.update(), gr.update(), "", "", ""
+        return "❌ HARDWARE ERROR: WEBCAM DATA INVALID", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Full Name regex (letters, spaces, hyphens only)
     import re
     if not re.match(r'^[a-zA-Z\s\-]+$', full_name.strip()):
-        return "❌ INVALID FULL NAME: Use letters, spaces, and hyphens only", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID FULL NAME: Use letters, spaces, and hyphens only", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Passport Number regex (alphanumeric)
     if not re.match(r'^[A-Za-z0-9]+$', passport.strip()):
-        return "❌ INVALID PASSPORT: Use letters and numbers only", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID PASSPORT: Use letters and numbers only", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Passport Expiry regex (YYYY-MM-DD format)
     if not re.match(r'^\d{4}-\d{2}-\d{2}$', passport_expiry.strip()):
-        return "❌ INVALID PASSPORT EXPIRY: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID PASSPORT EXPIRY: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Date of Birth regex (YYYY-MM-DD format)
     if not re.match(r'^\d{4}-\d{2}-\d{2}$', dob.strip()):
-        return "❌ INVALID DATE OF BIRTH: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID DATE OF BIRTH: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Phone regex (international format)
     if not re.match(r'^\+?[1-9]\d{1,14}$', phone.strip().replace(' ', '').replace('-', '')):
-        return "❌ INVALID PHONE: Use international format (e.g., +20123456789)", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID PHONE: Use international format (e.g., +201****6789)", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Arrival Date regex (YYYY-MM-DD format)
     if not re.match(r'^\d{4}-\d{2}-\d{2}$', arrival_date.strip()):
-        return "❌ INVALID ARRIVAL DATE: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID ARRIVAL DATE: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # STRICT VALIDATION: Departure Date regex (YYYY-MM-DD format)
     if not re.match(r'^\d{4}-\d{2}-\d{2}$', departure_date.strip()):
-        return "❌ INVALID DEPARTURE DATE: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID DEPARTURE DATE: Use YYYY-MM-DD format", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # Additional validation: Check if passport expiry is in the future
     try:
         from datetime import datetime
         expiry_date = datetime.strptime(passport_expiry.strip(), '%Y-%m-%d')
         if expiry_date <= datetime.now():
-            return "❌ PASSPORT EXPIRED: Passport must be valid for future travel", gr.update(), gr.update(), "", "", ""
+            return "❌ PASSPORT EXPIRED: Passport must be valid for future travel", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     except ValueError:
-        return "❌ INVALID DATE: Check passport expiry format", gr.update(), gr.update(), "", "", ""
+        return "❌ INVALID DATE: Check passport expiry format", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     # PROCEDURE DOC 1030 COMPLIANCE: 72-hour validation (bypass for demo users)
     if not ArrivalLogic.validate_submission_time(arrival_date.strip(), is_demo_user):
         validation_message = ArrivalLogic.get_validation_message(arrival_date.strip(), is_demo_user)
-        return f"❌ {validation_message}", gr.update(), gr.update(), "", "", ""
+        return f"❌ {validation_message}", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
     
     bio_hash = HorusSecurity.scan_face(image)
     if not bio_hash:
-        return "❌ BIOMETRIC SCAN FAILED", gr.update(), gr.update(), "", "", ""
+        return "❌ BIOMETRIC SCAN FAILED", gr.update(), gr.update(), "", "", "", "", gr.update(), gr.update()
 
     nationality_group = VisaPolicy.get_nationality_group(nationality)
     name = f"Traveler-{nationality[:3].upper()}-{passport[-4:]}"
